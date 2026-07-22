@@ -96,8 +96,10 @@ account that owns the `bojamiley-crm` project). Two settings worth knowing:
   hour. For a small team the simplest fix is Authentication → Sign In /
   Providers → Email → turn off "Confirm email". Then new team members can
   sign in immediately.
-- **Removing a person completely** (not just making them a Viewer) is done in
-  Authentication → Users → delete user.
+- **Removing a person completely** is built into the app: Menu → Team → the
+  ✕ next to their name (Admin only). It deletes their sign-in account; the
+  clients and orders they created stay in the system. Admins cannot delete
+  their own account, so the studio can never lock itself out.
 
 ## Customising
 
