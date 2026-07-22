@@ -59,6 +59,10 @@
     ["viewer", "Viewer (read only)"]
   ];
 
+  // Standard dress sizes from the studio size chart. Stored as
+  // measurements.size, alongside (or instead of) detailed measurements.
+  var SIZES = ["6", "8", "10", "12", "14", "16", "18", "20"];
+
   /* ---------- State ---------- */
 
   var db = { settings: { businessName: "Bojamiley", currency: "₦" }, clients: [], orders: [], profiles: [] };
@@ -825,8 +829,15 @@
           contactFields +
           '<div class="field full"><label for="c_notes">Style notes</label><textarea id="c_notes" placeholder="Preferences, fit notes, colours she loves…">' + esc(c ? c.notes : "") + "</textarea></div>" +
         "</div>" +
-        '<h3 class="section-title" style="margin-top:18px">Measurements <span style="font-weight:400;color:var(--muted);font-size:13px">(inches or cm, just be consistent)</span></h3>' +
-        '<div class="measure-grid">' + measureInputs + "</div>" +
+        '<h3 class="section-title" style="margin-top:18px">Size &amp; Measurements</h3>' +
+        '<div class="field" style="max-width:220px"><label for="c_size">Standard size (from size chart)</label>' +
+          '<select id="c_size"><option value="">— Not set —</option>' +
+          SIZES.map(function (s) {
+            return '<option value="' + s + '"' + (m.size === s ? " selected" : "") + ">Size " + s + "</option>";
+          }).join("") + "</select>" +
+          '<div class="hint">Pick a size if she already knows it. You can still fill in detailed measurements below, or leave them blank.</div>' +
+        "</div>" +
+        '<div class="measure-grid" style="margin-top:12px">' + measureInputs + "</div>" +
         '<div class="field" style="margin-top:12px"><label for="c_mnotes">Other measurements / notes</label><input id="c_mnotes" value="' + esc(c && c.measureNotes ? c.measureNotes : "") + '" placeholder="e.g. Slit length 20, prefers loose waist"></div>' +
         '<div class="modal-actions">' +
           (c && isAdmin() ? '<button type="button" class="btn btn-danger btn-sm" data-delete-client="' + c.id + '">Delete</button>' : "") +
@@ -860,6 +871,8 @@
       var v = $("#m_" + mm[0]).value.trim();
       if (v) c.measurements[mm[0]] = v;
     });
+    var sz = $("#c_size").value;
+    if (sz) c.measurements.size = sz;
 
     busy("#clientForm", true);
     var q = isNew
@@ -912,9 +925,10 @@
           : '<p style="color:var(--muted);font-size:13px;margin:6px 0 10px">🔒 Contact details are visible to the Admin only.</p>') +
         (isAdmin() && c.address ? '<div class="detail-item"><div class="dt">Address</div><div class="dd">' + esc(c.address) + "</div></div>" : "") +
         (c.notes ? '<div class="detail-item" style="margin-top:8px"><div class="dt">Style notes</div><div class="dd">' + esc(c.notes) + "</div></div>" : "") +
-        '<h3 class="section-title">📏 Measurements</h3>' +
-        (tiles ? '<div class="measure-view">' + tiles + "</div>"
-               : '<p style="color:var(--muted)">No measurements saved yet.' + (canEdit() ? " Tap Edit to add them." : "") + "</p>") +
+        '<h3 class="section-title">📏 Size &amp; Measurements</h3>' +
+        (m.size ? '<div class="size-badge">Size <strong>' + esc(m.size) + "</strong></div>" : "") +
+        (tiles ? '<div class="measure-view">' + tiles + "</div>" : "") +
+        (!tiles && !m.size ? '<p style="color:var(--muted)">No size or measurements saved yet.' + (canEdit() ? " Tap Edit to add them." : "") + "</p>" : "") +
         (c.measureNotes ? '<p style="margin-top:8px;font-size:14px;color:var(--muted)"><strong>Notes:</strong> ' + esc(c.measureNotes) + "</p>" : "") +
         '<h3 class="section-title">🛍 Orders (' + orders.length + ")</h3>" +
         (orders.length ? orders.map(function (o) {
@@ -1145,9 +1159,10 @@
     var tiles = MEASUREMENTS.filter(function (mm) { return m[mm[0]]; }).map(function (mm) {
       return '<div class="measure-tile"><div class="m-label">' + mm[1] + '</div><div class="m-value">' + esc(m[mm[0]]) + "</div></div>";
     }).join("");
-    if (!tiles) return "";
-    return '<h3 class="section-title">📏 ' + esc(c.name.split(" ")[0]) + "'s measurements</h3>" +
-      '<div class="measure-view">' + tiles + "</div>" +
+    if (!tiles && !m.size) return "";
+    return '<h3 class="section-title">📏 ' + esc(c.name.split(" ")[0]) + "'s size &amp; measurements</h3>" +
+      (m.size ? '<div class="size-badge">Size <strong>' + esc(m.size) + "</strong></div>" : "") +
+      (tiles ? '<div class="measure-view">' + tiles + "</div>" : "") +
       (c.measureNotes ? '<p style="margin-top:8px;font-size:14px;color:var(--muted)"><strong>Notes:</strong> ' + esc(c.measureNotes) + "</p>" : "");
   }
 

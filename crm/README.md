@@ -54,8 +54,10 @@ Internet is required since data lives in the cloud.
 ## What it does
 
 - **Clients:** name, phone (with one-tap Call / WhatsApp), address, style
-  notes, and a full measurement profile (bust, waist, hips, shoulder, sleeve,
-  gown length, and 12 more). Enter measurements once, reuse them on every order.
+  notes, a standard size from the size chart (6–20), and a full measurement
+  profile (bust, waist, hips, shoulder, sleeve, gown length, and 12 more).
+  Use the size on its own when she already knows it, the detailed
+  measurements, or both. Enter once, reuse on every order.
 - **Orders:** garment type, fabric (and who provided it), style description,
   price, order and due dates, urgent flag, and an order number (ORD-001...)
   assigned by the database so numbers never clash.
