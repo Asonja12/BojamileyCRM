@@ -607,7 +607,8 @@ input, select, textarea { font: inherit; color: inherit; }
 }
 
 .pay-form { display: flex; gap: 8px; margin-top: 10px; }
-.pay-form input { flex: 1; padding: 8px 12px; border: 1px solid var(--line); border-radius: 9px; }
+.pay-form input { flex: 1; min-width: 0; padding: 8px 12px; border: 1px solid var(--line); border-radius: 9px; }
+.pay-form .btn { flex-shrink: 0; }
 
 /* order rows inside client detail */
 
