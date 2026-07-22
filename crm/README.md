@@ -66,6 +66,12 @@ Internet is required since data lives in the cloud.
 - **Dashboard:** overdue orders and anything due in the next 7 days rise to
   the top, plus totals for active orders and outstanding balances.
 - **Team:** the Admin manages who has what access from the Menu.
+- **Analytics (Admin only):** a per-month view of orders received, money
+  received, new clients, booked value, average order value and on-time
+  delivery rate; 6-month trends for money and orders; who owes money and
+  how much; top clients by money received; most requested garments. Since
+  non-admins never receive money data from the database, there is nothing
+  for them to see here even in theory, so the tab is theirs alone.
 - **Job card printing:** open an order, *Print job card*, and pin the slip
   to the garment.
 - **Search and filters:** find any order or client by name, fabric, garment or
