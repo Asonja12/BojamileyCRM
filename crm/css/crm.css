@@ -572,6 +572,22 @@ input, select, textarea { font: inherit; color: inherit; }
 .measure-tile .m-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
 .measure-tile .m-value { font-size: 17px; font-weight: 700; color: var(--accent-dark); }
 
+/* selected standard size */
+.size-badge {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+  border-radius: 10px;
+  padding: 7px 14px;
+  font-size: 14px;
+  font-weight: 600;
+  margin: 6px 0 4px;
+}
+
+.size-badge strong { font-size: 19px; }
+
 /* payments */
 
 .pay-table { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 14.5px; }
@@ -591,8 +607,7 @@ input, select, textarea { font: inherit; color: inherit; }
 }
 
 .pay-form { display: flex; gap: 8px; margin-top: 10px; }
-.pay-form input { flex: 1; min-width: 0; padding: 8px 12px; border: 1px solid var(--line); border-radius: 9px; }
-.pay-form .btn { flex-shrink: 0; }
+.pay-form input { flex: 1; padding: 8px 12px; border: 1px solid var(--line); border-radius: 9px; }
 
 /* order rows inside client detail */
 
@@ -799,18 +814,17 @@ input, select, textarea { font: inherit; color: inherit; }
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
   padding: 9px 2px;
   border-bottom: 1px solid var(--line);
 }
 
 .team-row > div:first-child { min-width: 0; flex: 1 1 auto; }
-.team-row > div:last-child { flex-shrink: 0; }
-.team-row .t-name,
-.team-row .t-email { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.team-row .t-name { font-weight: 600; font-size: 14.5px; }
-.team-row .t-email { font-size: 12.5px; color: var(--muted); }
-.team-row select { padding: 6px 9px; border: 1px solid var(--line); border-radius: 8px; font-size: 13.5px; }
+.team-row > div:last-child { flex: 0 0 auto; }
+
+.team-row .t-name { font-weight: 600; font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.team-row .t-email { font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.team-row select { max-width: 44vw; padding: 6px 9px; border: 1px solid var(--line); border-radius: 8px; font-size: 13.5px; }
 
 /* ---------- Toast ---------- */
 
