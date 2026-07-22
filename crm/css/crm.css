@@ -803,6 +803,10 @@ input, select, textarea { font: inherit; color: inherit; }
   border-bottom: 1px solid var(--line);
 }
 
+.team-row > div:first-child { min-width: 0; flex: 1 1 auto; }
+.team-row > div:last-child { flex-shrink: 0; }
+.team-row .t-name,
+.team-row .t-email { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .team-row .t-name { font-weight: 600; font-size: 14.5px; }
 .team-row .t-email { font-size: 12.5px; color: var(--muted); }
 .team-row select { padding: 6px 9px; border: 1px solid var(--line); border-radius: 8px; font-size: 13.5px; }
