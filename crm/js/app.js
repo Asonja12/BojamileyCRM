@@ -930,6 +930,7 @@
           );
         }).join("") : '<p style="color:var(--muted)">No orders yet for this client.</p>') +
         '<div class="modal-actions">' +
+          (isAdmin() ? '<button class="btn btn-danger btn-sm" data-delete-client="' + c.id + '">Delete</button>' : "") +
           (canEdit() ? '<button class="btn btn-ghost" data-edit-client="' + c.id + '">✎ Edit Client</button>' : "") +
           '<span class="spacer"></span>' +
           (canEdit() ? '<button class="btn btn-primary" data-new-order-for="' + c.id + '">+ New Order for ' + esc(c.name.split(" ")[0]) + "</button>" : "") +
@@ -1206,10 +1207,14 @@
               return '<option value="' + r[0] + '"' + (p.role === r[0] ? " selected" : "") + ">" + r[1] + "</option>";
             }).join("") + "</select>"
         : '<span class="role-badge role-' + esc(p.role) + '">' + esc(p.role) + "</span>";
+      var removeBtn = isAdmin() && !isSelf
+        ? '<button class="btn btn-ghost btn-sm" data-delete-user="' + p.id + '" title="Delete this account">✕</button>'
+        : "";
       return (
         '<div class="team-row">' +
           "<div><div class=\"t-name\">" + esc(p.fullName || "(no name)") + (isSelf ? " (you)" : "") + '</div>' +
-          '<div class="t-email">' + esc(p.email) + "</div></div>" + select +
+          '<div class="t-email">' + esc(p.email) + "</div></div>" +
+          '<div style="display:flex;align-items:center;gap:6px">' + select + removeBtn + "</div>" +
         "</div>"
       );
     }).join("");
@@ -1259,6 +1264,20 @@
     });
   }
 
+  function deleteUser(userId) {
+    if (!isAdmin()) return;
+    var p = null;
+    db.profiles.forEach(function (x) { if (x.id === userId) p = x; });
+    if (!p) return;
+    if (!confirm("Delete " + (p.fullName || p.email) + "'s account? They will no longer be able to sign in. Clients and orders they created stay in the system.")) return;
+    sb.rpc("admin_delete_user", { target: userId }).then(function (res) {
+      if (res.error) return fail(res.error, "Could not delete user");
+      db.profiles = db.profiles.filter(function (x) { return x.id !== userId; });
+      toast("Account deleted");
+      showSettings();
+    });
+  }
+
   function changeRole(userId, role) {
     sb.from("profiles").update({ role: role }).eq("id", userId).select().single().then(function (res) {
       if (res.error) return fail(res.error, "Could not change role");
@@ -1294,8 +1313,13 @@
   document.addEventListener("click", function (e) {
     var t = e.target;
 
-    var el = t.closest("[data-tab],[data-action],[data-order-filter],[data-open-order],[data-open-client],[data-advance-order],[data-edit-client],[data-delete-client],[data-new-order-for],[data-edit-order],[data-delete-order],[data-set-status],[data-del-payment],[data-print-order],[data-modal-overlay],[data-an-shift]");
+    var el = t.closest("[data-tab],[data-action],[data-order-filter],[data-open-order],[data-open-client],[data-advance-order],[data-edit-client],[data-delete-client],[data-new-order-for],[data-edit-order],[data-delete-order],[data-set-status],[data-del-payment],[data-print-order],[data-modal-overlay],[data-an-shift],[data-delete-user]");
     if (!el) return;
+
+    if (el.hasAttribute("data-delete-user")) {
+      deleteUser(el.getAttribute("data-delete-user"));
+      return;
+    }
 
     if (el.hasAttribute("data-an-shift")) {
       var nowMk = todayISO().slice(0, 7);
