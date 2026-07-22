@@ -644,6 +644,105 @@ input, select, textarea { font: inherit; color: inherit; }
 
 .danger-zone h3 { font-size: 14px; color: var(--red); margin-bottom: 8px; }
 
+/* ---------- Analytics ---------- */
+
+.month-nav { display: flex; align-items: center; gap: 6px; }
+
+.month-nav .month-label {
+  font-weight: 700;
+  min-width: 120px;
+  text-align: center;
+  font-size: 15px;
+}
+
+.month-nav button {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: 8px;
+  width: 34px;
+  height: 34px;
+  font-size: 15px;
+  color: var(--ink);
+}
+
+.month-nav button:hover:not(:disabled) { border-color: var(--accent); }
+.month-nav button:disabled { opacity: 0.35; cursor: default; }
+
+.an-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.chart-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  box-shadow: var(--shadow);
+}
+
+.chart-card h4 {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.chart-card .chart-sub { font-size: 12.5px; color: var(--muted); }
+
+/* vertical mini bar chart (single series) */
+.mini-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  height: 110px;
+  margin-top: 12px;
+}
+
+.mini-col { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; min-width: 0; }
+
+.mini-val { font-size: 10.5px; color: var(--ink); font-weight: 600; margin-bottom: 2px; white-space: nowrap; }
+
+.mini-bar {
+  width: 100%;
+  max-width: 38px;
+  background: var(--accent);
+  border-radius: 4px 4px 0 0;
+  min-height: 2px;
+}
+
+.mini-bar.selected { background: var(--accent-dark); }
+
+.mini-x { font-size: 11px; color: var(--muted); margin-top: 5px; white-space: nowrap; }
+
+/* horizontal bars (e.g. popular garments) */
+.hbar-row { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
+.hbar-label { flex: 0 0 108px; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hbar-track { flex: 1; height: 10px; background: var(--surface-2); border-radius: 999px; overflow: hidden; }
+.hbar-fill { height: 100%; background: var(--accent); border-radius: 999px; }
+.hbar-count { flex: 0 0 34px; font-size: 12.5px; font-weight: 700; color: var(--ink); text-align: right; }
+
+/* ranked lists (debtors, top clients) */
+.list-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 2px;
+  border-bottom: 1px solid var(--line);
+  font-size: 14px;
+}
+
+.list-row:last-child { border-bottom: none; }
+.list-row .lr-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.list-row .lr-sub { font-size: 12px; color: var(--muted); font-weight: 400; }
+.list-row .lr-value { font-weight: 700; white-space: nowrap; }
+.list-row .lr-value.owed { color: var(--red); }
+
 /* ---------- Auth screen ---------- */
 
 .auth-wrap {

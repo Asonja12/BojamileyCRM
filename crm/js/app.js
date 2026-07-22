@@ -63,7 +63,7 @@
 
   var db = { settings: { businessName: "Bojamiley", currency: "₦" }, clients: [], orders: [], profiles: [] };
   var me = null; // my profile row: { id, email, fullName, role }
-  var ui = { tab: "dashboard", orderFilter: "active", orderSearch: "", clientSearch: "" };
+  var ui = { tab: "dashboard", orderFilter: "active", orderSearch: "", clientSearch: "", anMonth: null };
 
   function isAdmin() { return !!me && me.role === "admin"; }
   function canEdit() { return !!me && (me.role === "admin" || me.role === "staff"); }
@@ -353,9 +353,197 @@
     $("#ordersCount").textContent = db.orders.filter(isOpen).length || "";
     $("#clientsCount").textContent = db.clients.length || "";
     $all("[data-needs-edit]").forEach(function (el) { el.style.display = canEdit() ? "" : "none"; });
+    $("#analyticsTab").hidden = !isAdmin();
     renderDashboard();
     renderOrders();
     renderClients();
+    if (isAdmin()) renderAnalytics();
+  }
+
+  /* ---------- Analytics (admin only) ---------- */
+
+  function mkOf(s) { return s ? String(s).slice(0, 7) : ""; }
+
+  function mkShift(mk, delta) {
+    var p = mk.split("-");
+    var d = new Date(+p[0], +p[1] - 1 + delta, 1);
+    return d.getFullYear() + "-" + pad(d.getMonth() + 1);
+  }
+
+  function mkLabel(mk, short) {
+    var p = mk.split("-");
+    return new Date(+p[0], +p[1] - 1, 1).toLocaleDateString(undefined,
+      short ? { month: "short" } : { month: "long", year: "numeric" });
+  }
+
+  function monthStats(mk) {
+    var received = 0;
+    db.orders.forEach(function (o) {
+      (o.payments || []).forEach(function (p) {
+        if (mkOf(p.date) === mk) received += Number(p.amount || 0);
+      });
+    });
+    var taken = db.orders.filter(function (o) { return mkOf(o.orderDate) === mk && o.status !== "cancelled"; });
+    var cancelled = db.orders.filter(function (o) { return mkOf(o.orderDate) === mk && o.status === "cancelled"; });
+    var delivered = db.orders.filter(function (o) { return mkOf(o.deliveredAt) === mk; });
+    var withDue = delivered.filter(function (o) { return o.dueDate; });
+    var onTime = withDue.filter(function (o) { return o.deliveredAt <= o.dueDate; });
+    var booked = taken.reduce(function (s, o) { return s + Number(o.price || 0); }, 0);
+    return {
+      received: received,
+      taken: taken.length,
+      cancelled: cancelled.length,
+      delivered: delivered.length,
+      withDue: withDue.length,
+      onTime: onTime.length,
+      booked: booked,
+      avg: taken.length ? booked / taken.length : 0,
+      newClients: db.clients.filter(function (c) { return mkOf(c.createdAt) === mk; }).length
+    };
+  }
+
+  function miniChart(months, values, fmt) {
+    var max = Math.max.apply(null, values.concat([1]));
+    var maxIdx = values.indexOf(Math.max.apply(null, values));
+    return '<div class="mini-chart">' + months.map(function (mk, i) {
+      var h = Math.round((values[i] / max) * 100);
+      var showVal = values[i] > 0 && (i === maxIdx || i === months.length - 1);
+      return (
+        '<div class="mini-col" title="' + mkLabel(mk) + ": " + esc(fmt(values[i])) + '">' +
+          // the label row is always present so every bar competes for the
+          // same vertical space and heights stay comparable
+          '<div class="mini-val">' + (showVal ? esc(fmt(values[i])) : "&nbsp;") + "</div>" +
+          '<div class="mini-bar' + (mk === ui.anMonth ? " selected" : "") + '" style="height:' + h + '%"></div>' +
+          '<div class="mini-x">' + mkLabel(mk, true) + "</div>" +
+        "</div>"
+      );
+    }).join("") + "</div>";
+  }
+
+  function renderAnalytics() {
+    var view = $("#view-analytics");
+    if (!isAdmin()) { view.innerHTML = ""; return; }
+
+    var nowMk = todayISO().slice(0, 7);
+    if (!ui.anMonth) ui.anMonth = nowMk;
+    var mk = ui.anMonth;
+    var s = monthStats(mk);
+
+    // six months ending at the selected month
+    var months = [];
+    for (var i = 5; i >= 0; i--) months.push(mkShift(mk, -i));
+    var trendMoney = months.map(function (m) { return monthStats(m).received; });
+    var trendOrders = months.map(function (m) { return monthStats(m).taken; });
+
+    // who owes money (all time, open + delivered orders)
+    var owedBy = {};
+    db.orders.forEach(function (o) {
+      if (o.status === "cancelled") return;
+      var bal = balanceOf(o);
+      if (bal > 0) {
+        if (!owedBy[o.clientId]) owedBy[o.clientId] = { owed: 0, n: 0 };
+        owedBy[o.clientId].owed += bal;
+        owedBy[o.clientId].n++;
+      }
+    });
+    var debtors = Object.keys(owedBy).map(function (cid) {
+      return { name: clientName(cid), owed: owedBy[cid].owed, n: owedBy[cid].n };
+    }).sort(function (a, b) { return b.owed - a.owed; });
+    var totalOwed = debtors.reduce(function (t, d) { return t + d.owed; }, 0);
+
+    // top clients by money actually received (all time)
+    var paidBy = {};
+    db.orders.forEach(function (o) {
+      var paid = paidTotal(o);
+      if (paid > 0) {
+        if (!paidBy[o.clientId]) paidBy[o.clientId] = { paid: 0, n: 0 };
+        paidBy[o.clientId].paid += paid;
+        paidBy[o.clientId].n++;
+      }
+    });
+    var topClients = Object.keys(paidBy).map(function (cid) {
+      return { name: clientName(cid), paid: paidBy[cid].paid, n: paidBy[cid].n };
+    }).sort(function (a, b) { return b.paid - a.paid; }).slice(0, 5);
+
+    // most requested garments (all time, not cancelled)
+    var garmentCount = {};
+    db.orders.forEach(function (o) {
+      if (o.status === "cancelled" || !o.garment) return;
+      var g = o.garment.trim();
+      garmentCount[g] = (garmentCount[g] || 0) + 1;
+    });
+    var garments = Object.keys(garmentCount).map(function (g) {
+      return { g: g, n: garmentCount[g] };
+    }).sort(function (a, b) { return b.n - a.n; }).slice(0, 6);
+    var gMax = garments.length ? garments[0].n : 1;
+
+    var onTimeTxt = s.withDue ? Math.round((s.onTime / s.withDue) * 100) + "%" : "-";
+
+    view.innerHTML =
+      '<div class="view-head"><h2>Analytics</h2>' +
+        '<div class="month-nav">' +
+          '<button data-an-shift="-1" aria-label="Previous month">◀</button>' +
+          '<span class="month-label">' + mkLabel(mk) + "</span>" +
+          '<button data-an-shift="1" aria-label="Next month"' + (mk === nowMk ? " disabled" : "") + ">▶</button>" +
+        "</div></div>" +
+
+      '<div class="stats-grid">' +
+        statCard("Orders received", s.taken, "") +
+        statCard("Money received", money(s.received), "stat-money") +
+        statCard("New clients", s.newClients, "") +
+        statCard("Booked value", money(s.booked), "stat-money") +
+        statCard("Avg order value", money(Math.round(s.avg)), "") +
+        statCard("Delivered on time", onTimeTxt + (s.withDue ? " <span style=\"font-size:13px;color:var(--muted)\">(" + s.onTime + "/" + s.withDue + ")</span>" : ""), s.withDue && s.onTime < s.withDue ? "stat-warn" : "") +
+      "</div>" +
+      (s.cancelled ? '<p style="margin-top:8px;font-size:13.5px;color:var(--muted)">' + s.cancelled + " order" + (s.cancelled === 1 ? "" : "s") + " cancelled this month.</p>" : "") +
+
+      '<div class="an-cards">' +
+        '<div class="chart-card"><h4>Money received, last 6 months</h4>' +
+          '<div class="chart-sub">Payments recorded in each month</div>' +
+          miniChart(months, trendMoney, function (v) { return money(v); }) +
+        "</div>" +
+        '<div class="chart-card"><h4>Orders received, last 6 months</h4>' +
+          '<div class="chart-sub">New orders taken in each month</div>' +
+          miniChart(months, trendOrders, function (v) { return String(v); }) +
+        "</div>" +
+      "</div>" +
+
+      '<div class="an-cards">' +
+        '<div class="chart-card"><h4>Who owes money</h4>' +
+          '<div class="chart-sub">Total outstanding: <strong style="color:' + (totalOwed > 0 ? "var(--red)" : "var(--green)") + '">' + money(totalOwed) + "</strong></div>" +
+          (debtors.length
+            ? debtors.slice(0, 8).map(function (d) {
+                return '<div class="list-row"><span class="lr-name">' + esc(d.name) +
+                  ' <span class="lr-sub">' + d.n + " order" + (d.n === 1 ? "" : "s") + '</span></span>' +
+                  '<span class="lr-value owed">' + money(d.owed) + "</span></div>";
+              }).join("")
+            : '<p style="color:var(--muted);font-size:14px;margin-top:8px">Nobody owes you anything right now. 🎉</p>') +
+        "</div>" +
+        '<div class="chart-card"><h4>Top clients by money received</h4>' +
+          '<div class="chart-sub">All time. Your best clients deserve your best service.</div>' +
+          (topClients.length
+            ? topClients.map(function (t) {
+                return '<div class="list-row"><span class="lr-name">' + esc(t.name) +
+                  ' <span class="lr-sub">' + t.n + " order" + (t.n === 1 ? "" : "s") + '</span></span>' +
+                  '<span class="lr-value">' + money(t.paid) + "</span></div>";
+              }).join("")
+            : '<p style="color:var(--muted);font-size:14px;margin-top:8px">No payments recorded yet.</p>') +
+        "</div>" +
+      "</div>" +
+
+      '<div class="an-cards">' +
+        '<div class="chart-card"><h4>Most requested garments</h4>' +
+          '<div class="chart-sub">All time. What to showcase and stock fabric for.</div>' +
+          (garments.length
+            ? garments.map(function (g) {
+                return '<div class="hbar-row" title="' + esc(g.g) + ": " + g.n + ' orders">' +
+                  '<span class="hbar-label">' + esc(g.g) + "</span>" +
+                  '<span class="hbar-track"><span class="hbar-fill" style="width:' + Math.round((g.n / gMax) * 100) + '%"></span></span>' +
+                  '<span class="hbar-count">' + g.n + "</span></div>";
+              }).join("")
+            : '<p style="color:var(--muted);font-size:14px;margin-top:8px">No orders yet.</p>') +
+        "</div>" +
+      "</div>";
   }
 
   /* ---------- Dashboard ---------- */
@@ -1106,8 +1294,17 @@
   document.addEventListener("click", function (e) {
     var t = e.target;
 
-    var el = t.closest("[data-tab],[data-action],[data-order-filter],[data-open-order],[data-open-client],[data-advance-order],[data-edit-client],[data-delete-client],[data-new-order-for],[data-edit-order],[data-delete-order],[data-set-status],[data-del-payment],[data-print-order],[data-modal-overlay]");
+    var el = t.closest("[data-tab],[data-action],[data-order-filter],[data-open-order],[data-open-client],[data-advance-order],[data-edit-client],[data-delete-client],[data-new-order-for],[data-edit-order],[data-delete-order],[data-set-status],[data-del-payment],[data-print-order],[data-modal-overlay],[data-an-shift]");
     if (!el) return;
+
+    if (el.hasAttribute("data-an-shift")) {
+      var nowMk = todayISO().slice(0, 7);
+      var next = mkShift(ui.anMonth || nowMk, Number(el.getAttribute("data-an-shift")));
+      if (next > nowMk) next = nowMk;
+      ui.anMonth = next;
+      renderAnalytics();
+      return;
+    }
 
     if (el.hasAttribute("data-modal-overlay")) {
       if (e.target === el) closeModal();
