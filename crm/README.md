@@ -14,9 +14,16 @@ Everyone signs in with email and password. There are three access tiers:
 
 | Role | What they can do |
 |------|------------------|
-| **Admin** | Everything: edit, delete, settings, and changing team roles |
+| **Admin** | Everything: edit, delete, settings, changing team roles, and client contact details |
 | **Staff** | Add and edit clients and orders. Cannot delete anything, change settings, or change roles |
-| **Viewer** | See everything. Change nothing |
+| **Viewer** | See the work. Change nothing |
+
+**Client contact details (phone, email, address) are visible to the Admin
+only.** Staff and viewers see client names, measurements and style notes,
+which they need for the work, but the database refuses to give them contact
+columns, so client contacts cannot be copied out even with technical tricks.
+Staff can still type in contact details when first registering a new client;
+they just cannot read them back afterwards.
 
 - The **first account ever created becomes the Admin** automatically.
 - Everyone who signs up after that starts as a **Viewer** until the Admin
