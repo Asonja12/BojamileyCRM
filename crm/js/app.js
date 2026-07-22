@@ -182,19 +182,30 @@
 
   /* ---------- Row mappers (DB snake_case <-> app camelCase) ---------- */
 
+  // Contact columns (phone, email, address) are admin-only in the database;
+  // everyone else can only read these columns of the clients table.
+  var CLIENT_COLS = "id,name,notes,measure_notes,measurements,created_at";
+
   function rowToClient(r) {
     return {
-      id: r.id, name: r.name, phone: r.phone, email: r.email, address: r.address,
+      id: r.id, name: r.name,
+      phone: r.phone || "", email: r.email || "", address: r.address || "",
       notes: r.notes, measureNotes: r.measure_notes,
       measurements: r.measurements || {}, createdAt: r.created_at
     };
   }
 
   function clientToRow(c) {
-    return {
-      name: c.name, phone: c.phone, email: c.email, address: c.address,
-      notes: c.notes, measure_notes: c.measureNotes, measurements: c.measurements
+    var row = {
+      name: c.name, notes: c.notes,
+      measure_notes: c.measureNotes, measurements: c.measurements
     };
+    if (c.phone !== undefined) {
+      row.phone = c.phone;
+      row.email = c.email;
+      row.address = c.address;
+    }
+    return row;
   }
 
   function rowToOrder(r) {
@@ -217,9 +228,10 @@
   function loadAll() {
     return Promise.all([
       sb.from("settings").select("*").eq("id", 1).single(),
-      sb.from("clients").select("*").order("name"),
+      sb.from("clients").select(CLIENT_COLS).order("name"),
       sb.from("orders").select("*").order("created_at"),
-      sb.from("profiles").select("*").order("created_at")
+      sb.from("profiles").select("*").order("created_at"),
+      sb.from("client_contacts").select("*") // rows only come back for admins
     ]).then(function (res) {
       var errs = res.filter(function (r) { return r.error; });
       if (errs.length) throw errs[0].error;
@@ -227,6 +239,12 @@
       db.clients = res[1].data.map(rowToClient);
       db.orders = res[2].data.map(rowToOrder);
       db.profiles = res[3].data.map(rowToProfile);
+      var contacts = {};
+      (res[4].data || []).forEach(function (r) { contacts[r.id] = r; });
+      db.clients.forEach(function (c) {
+        var k = contacts[c.id];
+        if (k) { c.phone = k.phone || ""; c.email = k.email || ""; c.address = k.address || ""; }
+      });
       me = null;
       for (var i = 0; i < db.profiles.length; i++) {
         if (db.profiles[i].id === myUserId) me = db.profiles[i];
@@ -590,14 +608,22 @@
       );
     }).join("");
 
+    // Contact fields: admins always; staff only while creating a new client.
+    // On staff edits the fields are left out entirely so existing contact
+    // details can never be read back or wiped.
+    var showContacts = isAdmin() || !c;
+    var contactFields = showContacts
+      ? '<div class="field"><label for="c_phone">Phone / WhatsApp</label><input id="c_phone" type="tel" value="' + esc(c ? c.phone : "") + '" placeholder="e.g. +234 803 123 4567"></div>' +
+        '<div class="field"><label for="c_email">Email</label><input id="c_email" type="email" value="' + esc(c ? c.email : "") + '"></div>' +
+        '<div class="field full"><label for="c_address">Address</label><input id="c_address" value="' + esc(c ? c.address : "") + '"></div>'
+      : '<div class="field full"><div class="notice" style="margin-bottom:0">Contact details (phone, email, address) are managed by the Admin.</div></div>';
+
     openModal(
       modalHead(c ? "Edit Client" : "New Client", c ? esc(c.name) : "Save her details and measurements once, then reuse them on every order.") +
       '<div class="modal-body"><form id="clientForm" data-client-id="' + (c ? c.id : "") + '" data-then-order="' + (afterOrder ? "1" : "") + '">' +
         '<div class="form-grid">' +
           '<div class="field full"><label for="c_name">Full name *</label><input id="c_name" required value="' + esc(c ? c.name : "") + '" placeholder="e.g. Amaka Obi"></div>' +
-          '<div class="field"><label for="c_phone">Phone / WhatsApp</label><input id="c_phone" type="tel" value="' + esc(c ? c.phone : "") + '" placeholder="e.g. +234 803 123 4567"></div>' +
-          '<div class="field"><label for="c_email">Email</label><input id="c_email" type="email" value="' + esc(c ? c.email : "") + '"></div>' +
-          '<div class="field full"><label for="c_address">Address</label><input id="c_address" value="' + esc(c ? c.address : "") + '"></div>' +
+          contactFields +
           '<div class="field full"><label for="c_notes">Style notes</label><textarea id="c_notes" placeholder="Preferences, fit notes, colours she loves…">' + esc(c ? c.notes : "") + "</textarea></div>" +
         "</div>" +
         '<h3 class="section-title" style="margin-top:18px">Measurements <span style="font-weight:400;color:var(--muted);font-size:13px">(inches or cm, just be consistent)</span></h3>' +
@@ -621,13 +647,16 @@
 
     var c = {
       name: $("#c_name").value.trim(),
-      phone: $("#c_phone").value.trim(),
-      email: $("#c_email").value.trim(),
-      address: $("#c_address").value.trim(),
       notes: $("#c_notes").value.trim(),
       measureNotes: $("#c_mnotes").value.trim(),
       measurements: {}
     };
+    var hasContacts = !!$("#c_phone");
+    if (hasContacts) {
+      c.phone = $("#c_phone").value.trim();
+      c.email = $("#c_email").value.trim();
+      c.address = $("#c_address").value.trim();
+    }
     MEASUREMENTS.forEach(function (mm) {
       var v = $("#m_" + mm[0]).value.trim();
       if (v) c.measurements[mm[0]] = v;
@@ -635,12 +664,18 @@
 
     busy("#clientForm", true);
     var q = isNew
-      ? sb.from("clients").insert(clientToRow(c)).select().single()
-      : sb.from("clients").update(clientToRow(c)).eq("id", id).select().single();
+      ? sb.from("clients").insert(clientToRow(c)).select(CLIENT_COLS).single()
+      : sb.from("clients").update(clientToRow(c)).eq("id", id).select(CLIENT_COLS).single();
 
     q.then(function (res) {
       if (res.error) { busy("#clientForm", false); return fail(res.error, "Could not save client"); }
       var saved = rowToClient(res.data);
+      // contact columns never come back from the database; carry them over
+      // from what was just typed, or from what we already had
+      var prev = id ? clientById(id) : null;
+      saved.phone = hasContacts ? c.phone : (prev ? prev.phone : "");
+      saved.email = hasContacts ? c.email : (prev ? prev.email : "");
+      saved.address = hasContacts ? c.address : (prev ? prev.address : "");
       if (isNew) db.clients.push(saved);
       else db.clients = db.clients.map(function (x) { return x.id === saved.id ? saved : x; });
       renderAll();
@@ -669,12 +704,14 @@
     openModal(
       modalHead(esc(c.name), "Client since " + fmtDate(c.createdAt)) +
       '<div class="modal-body">' +
-        '<div class="contact-row">' +
-          (c.phone ? '<a class="contact-link" href="tel:' + esc(c.phone) + '">📞 ' + esc(c.phone) + "</a>" : "") +
-          (wa ? '<a class="contact-link whatsapp" href="https://wa.me/' + wa + '" target="_blank" rel="noopener">💬 WhatsApp</a>' : "") +
-          (c.email ? '<a class="contact-link" href="mailto:' + esc(c.email) + '">✉ ' + esc(c.email) + "</a>" : "") +
-        "</div>" +
-        (c.address ? '<div class="detail-item"><div class="dt">Address</div><div class="dd">' + esc(c.address) + "</div></div>" : "") +
+        (isAdmin()
+          ? '<div class="contact-row">' +
+              (c.phone ? '<a class="contact-link" href="tel:' + esc(c.phone) + '">📞 ' + esc(c.phone) + "</a>" : "") +
+              (wa ? '<a class="contact-link whatsapp" href="https://wa.me/' + wa + '" target="_blank" rel="noopener">💬 WhatsApp</a>' : "") +
+              (c.email ? '<a class="contact-link" href="mailto:' + esc(c.email) + '">✉ ' + esc(c.email) + "</a>" : "") +
+            "</div>"
+          : '<p style="color:var(--muted);font-size:13px;margin:6px 0 10px">🔒 Contact details are visible to the Admin only.</p>') +
+        (isAdmin() && c.address ? '<div class="detail-item"><div class="dt">Address</div><div class="dd">' + esc(c.address) + "</div></div>" : "") +
         (c.notes ? '<div class="detail-item" style="margin-top:8px"><div class="dt">Style notes</div><div class="dd">' + esc(c.notes) + "</div></div>" : "") +
         '<h3 class="section-title">📏 Measurements</h3>' +
         (tiles ? '<div class="measure-view">' + tiles + "</div>"
