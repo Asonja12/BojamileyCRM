@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 114">
+  <!-- Bojamiley mark: hanger hook, double ring, black disc, orange window-pane B -->
+  <path d="M50 27 v-5 a9 9 0 1 1 9 -9" fill="none" stroke="#0d0d0d" stroke-width="3.2" stroke-linecap="round"/>
+  <circle cx="50" cy="68" r="43" fill="#fff" stroke="#0d0d0d" stroke-width="3.2"/>
+  <circle cx="50" cy="68" r="37" fill="#0d0d0d"/>
+  <g fill="#f49721">
+    <rect x="30" y="46" width="17" height="21"/>
+    <rect x="30" y="70" width="17" height="21"/>
+    <path d="M50 46 h8.5 a10.5 10.5 0 0 1 0 21 H50 z"/>
+    <path d="M50 70 h8.5 a10.5 10.5 0 0 1 0 21 H50 z"/>
+  </g>
+</svg>
