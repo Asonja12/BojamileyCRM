@@ -134,20 +134,6 @@ input, select, textarea { font: inherit; color: inherit; }
 
 .tab.active { color: var(--accent-dark); border-bottom-color: var(--accent); }
 
-.tab-count {
-  display: inline-block;
-  min-width: 22px;
-  padding: 0 6px;
-  margin-left: 4px;
-  border-radius: 999px;
-  background: var(--surface-2);
-  color: var(--muted);
-  font-size: 12px;
-  text-align: center;
-}
-
-.tab.active .tab-count { background: var(--accent-soft); color: var(--accent-dark); }
-
 /* ---------- Layout ---------- */
 
 .main { max-width: 980px; margin: 0 auto; padding: 20px 16px 90px; }

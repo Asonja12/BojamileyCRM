@@ -350,8 +350,6 @@
   function renderAll() {
     $("#brandName").textContent = db.settings.businessName || "Bojamiley";
     document.title = (db.settings.businessName || "Bojamiley") + " CRM";
-    $("#ordersCount").textContent = db.orders.filter(isOpen).length || "";
-    $("#clientsCount").textContent = db.clients.length || "";
     $all("[data-needs-edit]").forEach(function (el) { el.style.display = canEdit() ? "" : "none"; });
     $("#analyticsTab").hidden = !isAdmin();
     renderDashboard();
