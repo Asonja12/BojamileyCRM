@@ -25,6 +25,13 @@ columns, so client contacts cannot be copied out even with technical tricks.
 Staff can still type in contact details when first registering a new client;
 they just cannot read them back afterwards.
 
+**All money is visible to the Admin only.** Prices, payments and balances
+never reach staff or viewer accounts: the database refuses to serve the
+money columns, the dashboard money card and all balance chips are hidden,
+and a database trigger ignores any price or payment a non-admin tries to
+write, so balances cannot be tampered with either. Setting prices and
+recording payments are Admin tasks.
+
 - The **first account ever created becomes the Admin** automatically.
 - Everyone who signs up after that starts as a **Viewer** until the Admin
   upgrades them (Menu → Team).
