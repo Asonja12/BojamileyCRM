@@ -186,6 +186,10 @@
   // everyone else can only read these columns of the clients table.
   var CLIENT_COLS = "id,name,notes,measure_notes,measurements,created_at";
 
+  // Money columns (price, payments) are admin-only in the database;
+  // everyone else can only read these columns of the orders table.
+  var ORDER_COLS = "id,ref,client_id,garment,fabric,fabric_by,urgent,description,notes,status,order_date,due_date,delivered_at,created_at,updated_at";
+
   function rowToClient(r) {
     return {
       id: r.id, name: r.name,
@@ -229,9 +233,10 @@
     return Promise.all([
       sb.from("settings").select("*").eq("id", 1).single(),
       sb.from("clients").select(CLIENT_COLS).order("name"),
-      sb.from("orders").select("*").order("created_at"),
+      sb.from("orders").select(ORDER_COLS).order("created_at"),
       sb.from("profiles").select("*").order("created_at"),
-      sb.from("client_contacts").select("*") // rows only come back for admins
+      sb.from("client_contacts").select("*"), // rows only come back for admins
+      sb.from("order_money").select("*")      // rows only come back for admins
     ]).then(function (res) {
       var errs = res.filter(function (r) { return r.error; });
       if (errs.length) throw errs[0].error;
@@ -244,6 +249,12 @@
       db.clients.forEach(function (c) {
         var k = contacts[c.id];
         if (k) { c.phone = k.phone || ""; c.email = k.email || ""; c.address = k.address || ""; }
+      });
+      var moneyRows = {};
+      (res[5].data || []).forEach(function (r) { moneyRows[r.id] = r; });
+      db.orders.forEach(function (o) {
+        var k = moneyRows[o.id];
+        if (k) { o.price = Number(k.price || 0); o.payments = k.payments || []; }
       });
       me = null;
       for (var i = 0; i < db.profiles.length; i++) {
@@ -383,7 +394,7 @@
         statCard("Active orders", open.length, "") +
         statCard("Overdue", overdue.length, overdue.length ? "stat-alert" : "") +
         statCard("Due in 7 days", dueSoon.length, dueSoon.length ? "stat-warn" : "") +
-        statCard("Balance owed", money(outstanding), "stat-money") +
+        (isAdmin() ? statCard("Balance owed", money(outstanding), "stat-money") : "") +
       "</div>";
 
     var attention = overdue.concat(dueSoon).sort(function (a, b) {
@@ -485,8 +496,10 @@
         "</div>" +
         '<div class="card-foot">' +
           '<div class="progress"><div class="progress-fill' + (st.key === "delivered" ? " done" : "") + '" style="width:' + st.progress + '%"></div></div>' +
-          '<span class="balance-chip ' + (bal > 0 ? "balance-owed" : "balance-paid") + '">' +
-            (bal > 0 ? "Owes " + money(bal) : "Fully paid ✓") + "</span>" +
+          (isAdmin()
+            ? '<span class="balance-chip ' + (bal > 0 ? "balance-owed" : "balance-paid") + '">' +
+              (bal > 0 ? "Owes " + money(bal) : "Fully paid ✓") + "</span>"
+            : "") +
           (next && isOpen(o) && canEdit() ? '<button class="btn btn-subtle btn-sm" data-advance-order="' + o.id + '">Move to ' + next.label + " →</button>" : "") +
         "</div>" +
       "</div>"
@@ -723,7 +736,7 @@
           return (
             '<div class="mini-order" data-open-order="' + o.id + '">' +
               "<div><div class=\"mo-title\">" + esc(o.ref) + " · " + esc(o.garment || "Order") + '</div>' +
-              '<div class="mo-sub">' + (o.dueDate ? "Due " + fmtDateShort(o.dueDate) + " · " : "") + money(o.price) + "</div></div>" +
+              '<div class="mo-sub">' + (o.dueDate ? "Due " + fmtDateShort(o.dueDate) : "") + (isAdmin() ? (o.dueDate ? " · " : "") + money(o.price) : "") + "</div></div>" +
               '<span class="pill st-' + st.key + '">' + st.label + "</span>" +
             "</div>"
           );
@@ -799,8 +812,9 @@
           '<div class="field full"><label for="o_desc">Style description</label><textarea id="o_desc" placeholder="Neckline, sleeves, length, embellishments, reference style…">' + esc(o ? o.description : "") + "</textarea></div>" +
           '<div class="field"><label for="o_orderDate">Order date</label><input id="o_orderDate" type="date" value="' + esc(o ? o.orderDate || "" : todayISO()) + '"></div>' +
           '<div class="field"><label for="o_dueDate">Due date</label><input id="o_dueDate" type="date" value="' + esc(o ? o.dueDate || "" : "") + '"></div>' +
-          '<div class="field"><label for="o_price">Total price</label><input id="o_price" type="number" min="0" step="any" inputmode="decimal" value="' + esc(o ? o.price : "") + '" placeholder="0"></div>' +
-          (o ? "" : '<div class="field"><label for="o_deposit">Deposit paid now</label><input id="o_deposit" type="number" min="0" step="any" inputmode="decimal" placeholder="0"></div>') +
+          (isAdmin() ? '<div class="field"><label for="o_price">Total price</label><input id="o_price" type="number" min="0" step="any" inputmode="decimal" value="' + esc(o ? o.price : "") + '" placeholder="0"></div>' : "") +
+          (isAdmin() && !o ? '<div class="field"><label for="o_deposit">Deposit paid now</label><input id="o_deposit" type="number" min="0" step="any" inputmode="decimal" placeholder="0"></div>' : "") +
+          (isAdmin() ? "" : '<div class="field full"><div class="notice" style="margin-bottom:0">Pricing and payments are managed by the Admin.</div></div>') +
           '<div class="field full"><label for="o_notes">Notes</label><textarea id="o_notes" placeholder="Anything else to remember…">' + esc(o ? o.notes : "") + "</textarea></div>" +
         "</div>" +
         '<div class="modal-actions">' +
@@ -826,24 +840,28 @@
       description: $("#o_desc").value.trim(),
       order_date: $("#o_orderDate").value || null,
       due_date: $("#o_dueDate").value || null,
-      price: Number($("#o_price").value || 0),
       notes: $("#o_notes").value.trim()
     };
+    if ($("#o_price")) row.price = Number($("#o_price").value || 0);
 
     if (isNew) {
       var dep = Number(($("#o_deposit") && $("#o_deposit").value) || 0);
-      row.payments = dep > 0 ? [{ amount: dep, date: row.order_date || todayISO(), note: "Deposit" }] : [];
+      if ($("#o_price")) row.payments = dep > 0 ? [{ amount: dep, date: row.order_date || todayISO(), note: "Deposit" }] : [];
       row.status = "new";
     }
 
     busy("#orderForm", true);
     var q = isNew
-      ? sb.from("orders").insert(row).select().single()
-      : sb.from("orders").update(row).eq("id", id).select().single();
+      ? sb.from("orders").insert(row).select(ORDER_COLS).single()
+      : sb.from("orders").update(row).eq("id", id).select(ORDER_COLS).single();
 
     q.then(function (res) {
       if (res.error) { busy("#orderForm", false); return fail(res.error, "Could not save order"); }
       var saved = rowToOrder(res.data);
+      // money columns never come back from the database; carry them over
+      var prevO = id ? orderById(id) : null;
+      saved.price = row.price !== undefined ? row.price : (prevO ? prevO.price : 0);
+      saved.payments = row.payments !== undefined ? row.payments : (prevO ? prevO.payments : []);
       if (isNew) db.orders.push(saved);
       else db.orders = db.orders.map(function (x) { return x.id === saved.id ? saved : x; });
       renderAll();
@@ -894,7 +912,7 @@
           detail("Order date", fmtDate(o.orderDate)) +
           detail("Due date", fmtDate(o.dueDate)) +
           detail("Fabric", esc(o.fabric || "-") + (o.fabricBy ? " (" + (o.fabricBy === "client" ? "client's fabric" : "our fabric") + ")" : "")) +
-          detail("Price", money(o.price), true) +
+          (isAdmin() ? detail("Price", money(o.price), true) : "") +
           (o.description ? '<div class="detail-item full"><div class="dt">Style description</div><div class="dd">' + esc(o.description) + "</div></div>" : "") +
           (o.notes ? '<div class="detail-item full"><div class="dt">Notes</div><div class="dd">' + esc(o.notes) + "</div></div>" : "") +
         "</div>" +
@@ -908,12 +926,12 @@
 
         clientMeasureBlock(c) +
 
-        '<h3 class="section-title">💰 Payments</h3>' +
-        (payRows ? '<table class="pay-table"><tbody>' + payRows + "</tbody></table>" : '<p style="color:var(--muted);font-size:14px">No payments recorded yet.</p>') +
-        '<div class="pay-summary"><span>Paid: <span style="color:var(--green)">' + money(paid) + "</span></span>" +
-          "<span>Balance: <span style=\"color:" + (bal > 0 ? "var(--red)" : "var(--green)") + '">' + money(bal) + "</span></span></div>" +
-        (canEdit()
-          ? '<form class="pay-form" id="paymentForm" data-order-id="' + o.id + '">' +
+        (isAdmin()
+          ? '<h3 class="section-title">💰 Payments</h3>' +
+            (payRows ? '<table class="pay-table"><tbody>' + payRows + "</tbody></table>" : '<p style="color:var(--muted);font-size:14px">No payments recorded yet.</p>') +
+            '<div class="pay-summary"><span>Paid: <span style="color:var(--green)">' + money(paid) + "</span></span>" +
+              "<span>Balance: <span style=\"color:" + (bal > 0 ? "var(--red)" : "var(--green)") + '">' + money(bal) + "</span></span></div>" +
+            '<form class="pay-form" id="paymentForm" data-order-id="' + o.id + '">' +
               '<input type="number" min="0.01" step="any" inputmode="decimal" id="p_amount" placeholder="Amount" required>' +
               '<button type="submit" class="btn btn-primary btn-sm">+ Add Payment</button>' +
             "</form>"
@@ -947,9 +965,13 @@
   }
 
   function persistOrderPatch(orderId, patch, onDone) {
-    sb.from("orders").update(patch).eq("id", orderId).select().single().then(function (res) {
+    sb.from("orders").update(patch).eq("id", orderId).select(ORDER_COLS).single().then(function (res) {
       if (res.error) return fail(res.error, "Could not update order");
       var saved = rowToOrder(res.data);
+      // money columns never come back from the database; carry them over
+      var prev = orderById(orderId);
+      saved.price = patch.price !== undefined ? patch.price : (prev ? prev.price : 0);
+      saved.payments = patch.payments !== undefined ? patch.payments : (prev ? prev.payments : []);
       db.orders = db.orders.map(function (x) { return x.id === saved.id ? saved : x; });
       renderAll();
       if (onDone) onDone(saved);
@@ -1174,7 +1196,7 @@
     else if (form.id === "settingsForm") { e.preventDefault(); saveSettings(); }
     else if (form.id === "paymentForm") {
       e.preventDefault();
-      if (!canEdit()) return;
+      if (!isAdmin()) return;
       var o = orderById(form.getAttribute("data-order-id"));
       var amt = Number($("#p_amount").value || 0);
       if (o && amt > 0) {
