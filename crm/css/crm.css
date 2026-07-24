@@ -117,11 +117,17 @@ input, select, textarea { font: inherit; color: inherit; }
   position: sticky;
   top: 0;
   z-index: 30;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
+
+.tabs::-webkit-scrollbar { display: none; }
 
 .tab {
   border: none;
   background: none;
+  flex: 0 0 auto;
+  white-space: nowrap;
   padding: 10px 16px 12px;
   font-size: 15px;
   font-weight: 600;
@@ -588,6 +594,16 @@ input, select, textarea { font: inherit; color: inherit; }
 
 .size-badge strong { font-size: 19px; }
 
+/* inventory */
+.qty-display { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.qty-num { font-size: 22px; font-weight: 800; color: var(--accent-dark); line-height: 1; }
+.qty-num.low { color: var(--red); }
+.qty-unit { font-size: 13px; color: var(--muted); }
+.qty-reorder { font-size: 12px; color: var(--muted); margin-left: 4px; }
+
+.stock-actions { display: flex; gap: 8px; margin: 4px 0 2px; }
+.stock-actions .btn { flex: 1; }
+
 /* payments */
 
 .pay-table { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 14.5px; }
@@ -607,8 +623,7 @@ input, select, textarea { font: inherit; color: inherit; }
 }
 
 .pay-form { display: flex; gap: 8px; margin-top: 10px; }
-.pay-form input { flex: 1; min-width: 0; padding: 8px 12px; border: 1px solid var(--line); border-radius: 9px; }
-.pay-form .btn { flex-shrink: 0; }
+.pay-form input { flex: 1; padding: 8px 12px; border: 1px solid var(--line); border-radius: 9px; }
 
 /* order rows inside client detail */
 
