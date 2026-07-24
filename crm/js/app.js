@@ -63,11 +63,22 @@
   // measurements.size, alongside (or instead of) detailed measurements.
   var SIZES = ["6", "8", "10", "12", "14", "16", "18", "20"];
 
+  // Inventory categories and units of measure (suggestions; free text allowed).
+  var CATEGORIES = [
+    "Fabric", "Lace", "Lining", "Interfacing", "Trim & Ribbon", "Thread",
+    "Beads & Stones", "Zippers", "Buttons", "Hooks & Fasteners", "Accessory",
+    "Finished Piece", "Packaging", "Other"
+  ];
+  var UNITS = ["yards", "meters", "pieces", "rolls", "spools", "sets", "packs", "metres"];
+  // Reasons for a stock movement (quick-pick; free text allowed).
+  var STOCK_IN_REASONS = ["Received from supplier", "Returned to stock", "Stock count correction", "Opening stock"];
+  var STOCK_OUT_REASONS = ["Used for an order", "Damaged / wastage", "Sample / giveaway", "Stock count correction"];
+
   /* ---------- State ---------- */
 
-  var db = { settings: { businessName: "Bojamiley", currency: "₦" }, clients: [], orders: [], profiles: [] };
+  var db = { settings: { businessName: "Bojamiley", currency: "₦" }, clients: [], orders: [], profiles: [], inventory: [] };
   var me = null; // my profile row: { id, email, fullName, role }
-  var ui = { tab: "dashboard", orderFilter: "active", orderSearch: "", clientSearch: "", anMonth: null };
+  var ui = { tab: "dashboard", orderFilter: "active", orderSearch: "", clientSearch: "", anMonth: null, invSearch: "", invCat: "all" };
 
   function isAdmin() { return !!me && me.role === "admin"; }
   function canEdit() { return !!me && (me.role === "admin" || me.role === "staff"); }
@@ -194,6 +205,9 @@
   // everyone else can only read these columns of the orders table.
   var ORDER_COLS = "id,ref,client_id,garment,fabric,fabric_by,urgent,description,notes,status,order_date,due_date,delivered_at,created_at,updated_at";
 
+  // unit_cost is admin-only on inventory_items (served via inventory_costs view).
+  var ITEM_COLS = "id,name,category,color,unit,quantity,reorder_level,supplier,notes,created_at,updated_at";
+
   function rowToClient(r) {
     return {
       id: r.id, name: r.name,
@@ -231,6 +245,26 @@
     return { id: r.id, email: r.email, fullName: r.full_name, role: r.role, createdAt: r.created_at };
   }
 
+  function rowToItem(r) {
+    return {
+      id: r.id, name: r.name, category: r.category, color: r.color,
+      unit: r.unit, quantity: Number(r.quantity || 0),
+      reorderLevel: Number(r.reorder_level || 0),
+      supplier: r.supplier, notes: r.notes,
+      unitCost: null, // filled from inventory_costs view for admins
+      createdAt: r.created_at, updatedAt: r.updated_at
+    };
+  }
+
+  function itemToRow(it) {
+    var row = {
+      name: it.name, category: it.category, color: it.color, unit: it.unit,
+      reorder_level: it.reorderLevel, supplier: it.supplier, notes: it.notes
+    };
+    if (it.unitCost !== undefined && it.unitCost !== null) row.unit_cost = it.unitCost;
+    return row;
+  }
+
   /* ---------- Data loading ---------- */
 
   function loadAll() {
@@ -240,7 +274,9 @@
       sb.from("orders").select(ORDER_COLS).order("created_at"),
       sb.from("profiles").select("*").order("created_at"),
       sb.from("client_contacts").select("*"), // rows only come back for admins
-      sb.from("order_money").select("*")      // rows only come back for admins
+      sb.from("order_money").select("*"),     // rows only come back for admins
+      sb.from("inventory_items").select(ITEM_COLS).order("name"),
+      sb.from("inventory_costs").select("*")   // rows only come back for admins
     ]).then(function (res) {
       var errs = res.filter(function (r) { return r.error; });
       if (errs.length) throw errs[0].error;
@@ -259,6 +295,13 @@
       db.orders.forEach(function (o) {
         var k = moneyRows[o.id];
         if (k) { o.price = Number(k.price || 0); o.payments = k.payments || []; }
+      });
+      db.inventory = res[6].data.map(rowToItem);
+      var costs = {};
+      (res[7].data || []).forEach(function (r) { costs[r.id] = r; });
+      db.inventory.forEach(function (it) {
+        var k = costs[it.id];
+        it.unitCost = k ? Number(k.unit_cost || 0) : null; // null = hidden from this user
       });
       me = null;
       for (var i = 0; i < db.profiles.length; i++) {
@@ -291,7 +334,7 @@
   sb.auth.onAuthStateChange(function (event, session) {
     if (event === "SIGNED_OUT") {
       me = null; myUserId = null;
-      db.clients = []; db.orders = []; db.profiles = [];
+      db.clients = []; db.orders = []; db.profiles = []; db.inventory = [];
       closeModal();
       show("authView");
     }
@@ -359,7 +402,310 @@
     renderDashboard();
     renderOrders();
     renderClients();
+    renderInventory();
     if (isAdmin()) renderAnalytics();
+  }
+
+  /* ---------- Inventory ---------- */
+
+  function isLowStock(it) {
+    return it.reorderLevel > 0 && it.quantity <= it.reorderLevel;
+  }
+
+  function itemValue(it) {
+    return it.unitCost == null ? null : it.quantity * it.unitCost;
+  }
+
+  function fmtQty(n) {
+    var v = Number(n || 0);
+    return (Math.round(v * 100) / 100).toLocaleString(undefined, { maximumFractionDigits: 2 });
+  }
+
+  function renderInventory() {
+    var view = $("#view-inventory");
+    if (!view) return;
+
+    var list = db.inventory.slice();
+    var cats = {};
+    db.inventory.forEach(function (it) { cats[it.category] = (cats[it.category] || 0) + 1; });
+    var catList = Object.keys(cats).sort();
+
+    if (ui.invCat !== "all") list = list.filter(function (it) { return it.category === ui.invCat; });
+    if (ui.invSearch) {
+      var q = ui.invSearch.toLowerCase();
+      list = list.filter(function (it) {
+        return (it.name + " " + it.category + " " + it.color + " " + it.supplier + " " + it.notes).toLowerCase().indexOf(q) !== -1;
+      });
+    }
+    list.sort(function (a, b) {
+      var la = isLowStock(a) ? 0 : 1, lb = isLowStock(b) ? 0 : 1;
+      return la - lb || a.name.localeCompare(b.name);
+    });
+
+    var low = db.inventory.filter(isLowStock);
+
+    var html =
+      '<div class="view-head"><h2>Inventory</h2>' +
+        (canEdit() ? '<button class="btn btn-primary" data-action="new-item">+ Add Item</button>' : "") + "</div>";
+
+    if (low.length) {
+      html += '<div class="notice" style="background:var(--red-soft);border-color:#eecfca;color:var(--red)">' +
+        "⚠ <strong>" + low.length + " item" + (low.length === 1 ? "" : "s") + " low on stock.</strong> " +
+        esc(low.slice(0, 4).map(function (it) { return it.name; }).join(", ")) +
+        (low.length > 4 ? " and " + (low.length - 4) + " more" : "") + ".</div>";
+    }
+
+    html +=
+      '<div class="toolbar">' +
+        '<input class="search-input" id="invSearch" type="search" placeholder="Search fabric, colour, supplier…" value="' + esc(ui.invSearch) + '">' +
+        '<div class="chip-row">' +
+          '<button class="chip ' + (ui.invCat === "all" ? "active" : "") + '" data-inv-cat="all">All</button>' +
+          catList.map(function (c) {
+            return '<button class="chip ' + (ui.invCat === c ? "active" : "") + '" data-inv-cat="' + esc(c) + '">' + esc(c) + " (" + cats[c] + ")</button>";
+          }).join("") +
+        "</div>" +
+      "</div>";
+
+    if (list.length) {
+      html += '<div class="card-list">' + list.map(itemCard).join("") + "</div>";
+    } else if (db.inventory.length === 0) {
+      html += '<div class="empty"><span class="empty-icon">🧵</span><h3>No stock items yet</h3>' +
+        "<p>Track your fabrics, linings, trims, thread, beads and accessories so you always know what you have and what to reorder.</p>" +
+        (canEdit() ? '<button class="btn btn-primary" data-action="new-item">+ Add Item</button>' : "") + "</div>";
+    } else {
+      html += '<div class="empty"><span class="empty-icon">🔍</span><h3>No items match</h3><p>Try a different search or category.</p></div>';
+    }
+
+    view.innerHTML = html;
+  }
+
+  function itemCard(it) {
+    var low = isLowStock(it);
+    var val = itemValue(it);
+    return (
+      '<div class="item-card" data-open-item="' + it.id + '">' +
+        '<div class="card-top">' +
+          '<div><div class="card-title">' + esc(it.name) + (it.color ? ' <span class="ref" style="text-transform:none">' + esc(it.color) + "</span>" : "") + "</div>" +
+          '<div class="card-sub">' + esc(it.category) + (it.supplier ? " · " + esc(it.supplier) : "") + "</div></div>" +
+          '<div class="card-badges">' +
+            (low ? '<span class="due-badge due-overdue">Low stock</span>' : "") +
+          "</div>" +
+        "</div>" +
+        '<div class="card-foot">' +
+          '<div class="qty-display"><span class="qty-num' + (low ? " low" : "") + '">' + fmtQty(it.quantity) + '</span> <span class="qty-unit">' + esc(it.unit) + "</span>" +
+            (it.reorderLevel > 0 ? ' <span class="qty-reorder">reorder at ' + fmtQty(it.reorderLevel) + "</span>" : "") + "</div>" +
+          (val != null ? '<span class="balance-chip" style="color:var(--accent-dark)">' + money(val) + " value</span>" : "") +
+        "</div>" +
+      "</div>"
+    );
+  }
+
+  function itemById(id) {
+    for (var i = 0; i < db.inventory.length; i++) if (db.inventory[i].id === id) return db.inventory[i];
+    return null;
+  }
+
+  function showItemForm(itemId) {
+    if (!canEdit()) return;
+    var it = itemId ? itemById(itemId) : null;
+    var isNew = !it;
+
+    var catOpts = CATEGORIES.map(function (c) { return '<option value="' + esc(c) + '">'; }).join("");
+    var unitOpts = UNITS.map(function (u) {
+      return '<option value="' + esc(u) + '"' + (it && it.unit === u ? " selected" : (!it && u === "yards" ? " selected" : "")) + ">" + esc(u) + "</option>";
+    }).join("");
+
+    openModal(
+      modalHead(it ? "Edit Item" : "Add Stock Item", it ? esc(it.name) : "Fabric, lining, trim, thread, beads, accessories — whatever you keep in stock.") +
+      '<div class="modal-body"><form id="itemForm" data-item-id="' + (it ? it.id : "") + '">' +
+        '<div class="form-grid">' +
+          '<div class="field full"><label for="i_name">Item name *</label><input id="i_name" required value="' + esc(it ? it.name : "") + '" placeholder="e.g. Ivory French Lace"></div>' +
+          '<div class="field"><label for="i_category">Category</label><input id="i_category" list="catList" value="' + esc(it ? it.category : "Fabric") + '" placeholder="Fabric"><datalist id="catList">' + catOpts + "</datalist></div>" +
+          '<div class="field"><label for="i_color">Colour</label><input id="i_color" value="' + esc(it ? it.color : "") + '" placeholder="e.g. Ivory"></div>' +
+          '<div class="field"><label for="i_unit">Unit</label><select id="i_unit">' + unitOpts + "</select></div>" +
+          (isNew ? '<div class="field"><label for="i_qty">Opening quantity</label><input id="i_qty" type="number" min="0" step="any" inputmode="decimal" value="0"></div>'
+                 : '<div class="field"><label>In stock now</label><input value="' + esc(fmtQty(it.quantity) + " " + it.unit) + '" disabled><div class="hint">Use Stock in / out to change this.</div></div>') +
+          '<div class="field"><label for="i_reorder">Reorder level (low-stock alert)</label><input id="i_reorder" type="number" min="0" step="any" inputmode="decimal" value="' + esc(it ? it.reorderLevel : "") + '" placeholder="e.g. 5"></div>' +
+          (isAdmin() ? '<div class="field"><label for="i_cost">Cost per ' + esc(it ? it.unit : "unit") + '</label><input id="i_cost" type="number" min="0" step="any" inputmode="decimal" value="' + esc(it && it.unitCost != null ? it.unitCost : "") + '" placeholder="0"></div>'
+                     : '<div class="field full"><div class="notice" style="margin-bottom:0">Cost is managed by the Admin.</div></div>') +
+          '<div class="field"><label for="i_supplier">Supplier</label><input id="i_supplier" value="' + esc(it ? it.supplier : "") + '" placeholder="Where to reorder"></div>' +
+          '<div class="field full"><label for="i_notes">Notes</label><textarea id="i_notes" placeholder="Anything to remember…">' + esc(it ? it.notes : "") + "</textarea></div>" +
+        "</div>" +
+        '<div class="modal-actions">' +
+          (it && isAdmin() ? '<button type="button" class="btn btn-danger btn-sm" data-delete-item="' + it.id + '">Delete</button>' : "") +
+          '<span class="spacer"></span>' +
+          '<button type="button" class="btn btn-ghost" data-action="close-modal">Cancel</button>' +
+          '<button type="submit" class="btn btn-primary">' + (it ? "Save Changes" : "Add Item") + "</button>" +
+        "</div>" +
+      "</form></div>"
+    );
+    $("#i_name").focus();
+  }
+
+  function submitItemForm(form) {
+    var id = form.getAttribute("data-item-id");
+    var isNew = !id;
+    var it = {
+      name: $("#i_name").value.trim(),
+      category: $("#i_category").value.trim() || "Other",
+      color: $("#i_color").value.trim(),
+      unit: $("#i_unit").value,
+      reorderLevel: Number($("#i_reorder").value || 0),
+      supplier: $("#i_supplier").value.trim(),
+      notes: $("#i_notes").value.trim()
+    };
+    if ($("#i_cost")) it.unitCost = Number($("#i_cost").value || 0);
+
+    busy("#itemForm", true);
+    var q = isNew
+      ? sb.from("inventory_items").insert(itemToRow(it)).select(ITEM_COLS).single()
+      : sb.from("inventory_items").update(itemToRow(it)).eq("id", id).select(ITEM_COLS).single();
+
+    q.then(function (res) {
+      if (res.error) { busy("#itemForm", false); return fail(res.error, "Could not save item"); }
+      var saved = rowToItem(res.data);
+      var prev = id ? itemById(id) : null;
+      // unit_cost never comes back from ITEM_COLS; carry over what we know
+      saved.unitCost = $("#i_cost") ? it.unitCost : (prev ? prev.unitCost : null);
+      var opening = isNew ? Number(($("#i_qty") && $("#i_qty").value) || 0) : 0;
+
+      function finish() {
+        if (isNew) db.inventory.push(saved);
+        else db.inventory = db.inventory.map(function (x) { return x.id === saved.id ? saved : x; });
+        renderAll();
+        toast(isNew ? "Item added ✓" : "Item saved ✓");
+        showItemDetail(saved.id);
+      }
+      if (isNew && opening > 0) {
+        sb.rpc("adjust_stock", { p_item: saved.id, p_delta: opening, p_reason: "Opening stock" }).then(function (r2) {
+          if (!r2.error) saved.quantity = Number(r2.data);
+          finish();
+        });
+      } else {
+        finish();
+      }
+    });
+  }
+
+  function showItemDetail(id) {
+    var it = itemById(id);
+    if (!it) return;
+    var low = isLowStock(it);
+    var val = itemValue(it);
+
+    openModal(
+      modalHead(esc(it.name), esc(it.category) + (it.color ? " · " + esc(it.color) : "")) +
+      '<div class="modal-body">' +
+        '<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:6px">' +
+          '<span class="qty-num' + (low ? " low" : "") + '" style="font-size:30px">' + fmtQty(it.quantity) + '</span>' +
+          '<span class="qty-unit" style="font-size:16px">' + esc(it.unit) + " in stock</span>" +
+          (low ? '<span class="due-badge due-overdue">Low stock</span>' : "") +
+        "</div>" +
+        '<div class="detail-grid">' +
+          detail("Reorder level", it.reorderLevel > 0 ? fmtQty(it.reorderLevel) + " " + esc(it.unit) : "Not set") +
+          detail("Supplier", it.supplier ? esc(it.supplier) : "-") +
+          (isAdmin() ? detail("Cost per " + esc(it.unit), it.unitCost != null ? money(it.unitCost) : "-") : "") +
+          (val != null ? detail("Stock value", money(val), true) : "") +
+          (it.notes ? '<div class="detail-item full"><div class="dt">Notes</div><div class="dd">' + esc(it.notes) + "</div></div>" : "") +
+        "</div>" +
+
+        (canEdit()
+          ? '<h3 class="section-title">Adjust stock</h3>' +
+            '<div class="stock-actions">' +
+              '<button class="btn btn-subtle" data-stock-in="' + it.id + '">＋ Stock in</button>' +
+              '<button class="btn btn-subtle" data-stock-out="' + it.id + '">－ Stock out</button>' +
+            "</div>"
+          : "") +
+
+        '<h3 class="section-title">History</h3>' +
+        '<div id="moveList"><p style="color:var(--muted);font-size:14px">Loading…</p></div>' +
+
+        '<div class="modal-actions">' +
+          (canEdit() ? '<button class="btn btn-ghost" data-edit-item="' + it.id + '">✎ Edit</button>' : "") +
+          '<span class="spacer"></span>' +
+          '<button class="btn btn-ghost" data-action="close-modal">Close</button>' +
+        "</div>" +
+      "</div>"
+    );
+
+    loadMovements(id);
+  }
+
+  function loadMovements(itemId) {
+    sb.from("inventory_movements").select("*").eq("item_id", itemId)
+      .order("created_at", { ascending: false }).limit(50)
+      .then(function (res) {
+        var el = $("#moveList");
+        if (!el) return;
+        if (res.error) { el.innerHTML = '<p style="color:var(--muted);font-size:14px">Could not load history.</p>'; return; }
+        var rows = res.data || [];
+        if (!rows.length) { el.innerHTML = '<p style="color:var(--muted);font-size:14px">No stock movements yet.</p>'; return; }
+        var who = {};
+        db.profiles.forEach(function (p) { who[p.id] = p.fullName || p.email; });
+        el.innerHTML = '<table class="pay-table"><tbody>' + rows.map(function (m) {
+          var inn = Number(m.delta) >= 0;
+          return "<tr><td>" + esc(fmtDateShort(m.created_at)) +
+            (m.reason ? " · " + esc(m.reason) : "") +
+            (who[m.created_by] ? ' <span style="color:var(--muted)">by ' + esc(who[m.created_by]) + "</span>" : "") +
+            '</td><td style="color:' + (inn ? "var(--green)" : "var(--red)") + '">' +
+            (inn ? "+" : "") + fmtQty(m.delta) + "</td></tr>";
+        }).join("") + "</tbody></table>";
+      });
+  }
+
+  function stockDialog(itemId, dir) {
+    var it = itemById(itemId);
+    if (!it || !canEdit()) return;
+    var isIn = dir === "in";
+    var reasons = isIn ? STOCK_IN_REASONS : STOCK_OUT_REASONS;
+    openModal(
+      modalHead((isIn ? "Stock in" : "Stock out") + " · " + esc(it.name), fmtQty(it.quantity) + " " + esc(it.unit) + " in stock now") +
+      '<div class="modal-body"><form id="stockForm" data-item-id="' + it.id + '" data-dir="' + dir + '">' +
+        '<div class="field"><label for="st_qty">Quantity to ' + (isIn ? "add" : "remove") + ' (' + esc(it.unit) + ') *</label>' +
+          '<input id="st_qty" type="number" min="0" step="any" inputmode="decimal" required autofocus placeholder="0"></div>' +
+        '<div class="field" style="margin-top:10px"><label for="st_reason">Reason</label>' +
+          '<input id="st_reason" list="reasonList" placeholder="' + esc(reasons[0]) + '">' +
+          '<datalist id="reasonList">' + reasons.map(function (r) { return '<option value="' + esc(r) + '">'; }).join("") + "</datalist></div>" +
+        '<div class="modal-actions"><span class="spacer"></span>' +
+          '<button type="button" class="btn btn-ghost" data-action="close-modal">Cancel</button>' +
+          '<button type="submit" class="btn btn-primary">' + (isIn ? "Add to stock" : "Remove from stock") + "</button>" +
+        "</div>" +
+      "</form></div>"
+    );
+  }
+
+  function submitStock(form) {
+    var it = itemById(form.getAttribute("data-item-id"));
+    if (!it || !canEdit()) return;
+    var isIn = form.getAttribute("data-dir") === "in";
+    var qty = Number($("#st_qty").value || 0);
+    if (!(qty > 0)) { toast("Enter a quantity greater than zero", true); return; }
+    if (!isIn && qty > it.quantity && !confirm("You're removing more than the " + fmtQty(it.quantity) + " " + it.unit + " in stock. Continue? (stock will go negative)")) return;
+    var delta = isIn ? qty : -qty;
+    var reason = $("#st_reason").value.trim() || (isIn ? "Stock in" : "Stock out");
+    busy("#stockForm", true);
+    sb.rpc("adjust_stock", { p_item: it.id, p_delta: delta, p_reason: reason }).then(function (res) {
+      if (res.error) { busy("#stockForm", false); return fail(res.error, "Could not adjust stock"); }
+      it.quantity = Number(res.data);
+      db.inventory = db.inventory.map(function (x) { return x.id === it.id ? it : x; });
+      renderAll();
+      toast((isIn ? "Added " : "Removed ") + fmtQty(qty) + " " + it.unit + " ✓");
+      showItemDetail(it.id);
+    });
+  }
+
+  function deleteItem(id) {
+    if (!isAdmin()) return;
+    var it = itemById(id);
+    if (!it) return;
+    if (!confirm("Delete “" + it.name + "” and its whole stock history? This cannot be undone.")) return;
+    sb.from("inventory_items").delete().eq("id", id).then(function (res) {
+      if (res.error) return fail(res.error, "Could not delete item");
+      db.inventory = db.inventory.filter(function (x) { return x.id !== id; });
+      renderAll();
+      closeModal();
+      toast("Item deleted");
+    });
   }
 
   /* ---------- Analytics (admin only) ---------- */
@@ -545,7 +891,32 @@
               }).join("")
             : '<p style="color:var(--muted);font-size:14px;margin-top:8px">No orders yet.</p>') +
         "</div>" +
-      "</div>";
+      "</div>" +
+
+      // Inventory money view for the admin: capital tied up in stock + reorder list
+      (function () {
+        if (!db.inventory.length) return "";
+        var invValue = db.inventory.reduce(function (t, it) {
+          return t + (it.unitCost != null ? it.quantity * it.unitCost : 0);
+        }, 0);
+        var lowItems = db.inventory.filter(isLowStock);
+        return '<h3 class="section-title">🧵 Inventory</h3>' +
+          '<div class="stats-grid">' +
+            statCard("Stock value", money(invValue), "stat-money") +
+            statCard("Items tracked", db.inventory.length, "") +
+            statCard("Low on stock", lowItems.length, lowItems.length ? "stat-alert" : "") +
+          "</div>" +
+          '<div class="an-cards"><div class="chart-card"><h4>Reorder soon</h4>' +
+            '<div class="chart-sub">Items at or below their reorder level.</div>' +
+            (lowItems.length
+              ? lowItems.sort(function (a, b) { return a.quantity - b.quantity; }).slice(0, 8).map(function (it) {
+                  return '<div class="list-row"><span class="lr-name">' + esc(it.name) +
+                    ' <span class="lr-sub">' + esc(it.category) + "</span></span>" +
+                    '<span class="lr-value owed">' + fmtQty(it.quantity) + " " + esc(it.unit) + "</span></div>";
+                }).join("")
+              : '<p style="color:var(--muted);font-size:14px;margin-top:8px">Everything is well stocked. 🎉</p>') +
+          "</div></div>";
+      })();
   }
 
   /* ---------- Dashboard ---------- */
@@ -1326,13 +1697,20 @@
   document.addEventListener("click", function (e) {
     var t = e.target;
 
-    var el = t.closest("[data-tab],[data-action],[data-order-filter],[data-open-order],[data-open-client],[data-advance-order],[data-edit-client],[data-delete-client],[data-new-order-for],[data-edit-order],[data-delete-order],[data-set-status],[data-del-payment],[data-print-order],[data-modal-overlay],[data-an-shift],[data-delete-user]");
+    var el = t.closest("[data-tab],[data-action],[data-order-filter],[data-open-order],[data-open-client],[data-advance-order],[data-edit-client],[data-delete-client],[data-new-order-for],[data-edit-order],[data-delete-order],[data-set-status],[data-del-payment],[data-print-order],[data-modal-overlay],[data-an-shift],[data-delete-user],[data-inv-cat],[data-open-item],[data-edit-item],[data-delete-item],[data-stock-in],[data-stock-out]");
     if (!el) return;
 
     if (el.hasAttribute("data-delete-user")) {
       deleteUser(el.getAttribute("data-delete-user"));
       return;
     }
+
+    if (el.hasAttribute("data-inv-cat")) { ui.invCat = el.getAttribute("data-inv-cat"); renderInventory(); return; }
+    if (el.hasAttribute("data-open-item")) { showItemDetail(el.getAttribute("data-open-item")); return; }
+    if (el.hasAttribute("data-edit-item")) { showItemForm(el.getAttribute("data-edit-item")); return; }
+    if (el.hasAttribute("data-delete-item")) { deleteItem(el.getAttribute("data-delete-item")); return; }
+    if (el.hasAttribute("data-stock-in")) { stockDialog(el.getAttribute("data-stock-in"), "in"); return; }
+    if (el.hasAttribute("data-stock-out")) { stockDialog(el.getAttribute("data-stock-out"), "out"); return; }
 
     if (el.hasAttribute("data-an-shift")) {
       var nowMk = todayISO().slice(0, 7);
@@ -1397,6 +1775,7 @@
       case "new-order": showOrderForm(null, null); break;
       case "new-client": showClientForm(null); break;
       case "new-client-then-order": showClientForm(null, { thenOrder: true }); break;
+      case "new-item": showItemForm(null); break;
       case "open-settings": showSettings(); break;
       case "export-data": exportData(); break;
       case "sign-out": signOut(); break;
@@ -1425,6 +1804,8 @@
     var form = e.target;
     if (form.id === "clientForm") { e.preventDefault(); submitClientForm(form); }
     else if (form.id === "orderForm") { e.preventDefault(); submitOrderForm(form); }
+    else if (form.id === "itemForm") { e.preventDefault(); submitItemForm(form); }
+    else if (form.id === "stockForm") { e.preventDefault(); submitStock(form); }
     else if (form.id === "signinForm") { e.preventDefault(); doSignIn(form); }
     else if (form.id === "signupForm") { e.preventDefault(); doSignUp(form); }
     else if (form.id === "settingsForm") { e.preventDefault(); saveSettings(); }
@@ -1446,6 +1827,7 @@
   document.addEventListener("input", function (e) {
     if (e.target.id === "orderSearch") { ui.orderSearch = e.target.value; renderOrdersPreservingFocus(); }
     else if (e.target.id === "clientSearch") { ui.clientSearch = e.target.value; renderClientsPreservingFocus(); }
+    else if (e.target.id === "invSearch") { ui.invSearch = e.target.value; renderInvPreservingFocus(); }
   });
 
   function renderOrdersPreservingFocus() {
@@ -1460,6 +1842,14 @@
     var pos = $("#clientSearch").selectionStart;
     renderClients();
     var inp = $("#clientSearch");
+    inp.focus();
+    inp.setSelectionRange(pos, pos);
+  }
+
+  function renderInvPreservingFocus() {
+    var pos = $("#invSearch").selectionStart;
+    renderInventory();
+    var inp = $("#invSearch");
     inp.focus();
     inp.setSelectionRange(pos, pos);
   }

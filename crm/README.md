@@ -67,13 +67,23 @@ Internet is required since data lives in the cloud.
   always visible on the order and on the client.
 - **Dashboard:** overdue orders and anything due in the next 7 days rise to
   the top, plus totals for active orders and outstanding balances.
+- **Inventory:** track fabrics, lace, linings, trims, thread, beads, zippers,
+  accessories and finished pieces. Each item has a category, colour, unit
+  (yards/meters/pieces/rolls/spools/…), quantity on hand, a reorder level that
+  triggers a **low-stock alert**, supplier, and unit cost. Stock changes go
+  through **Stock in / Stock out** with a reason, and every change is kept in a
+  **movement history** so you can see what came in, what was used, and when.
+  Quantities are visible to everyone (staff need them to work); **cost and
+  stock value are Admin-only**, enforced by the database exactly like order
+  prices. Staff can add/edit items and adjust stock; only the Admin deletes.
 - **Team:** the Admin manages who has what access from the Menu.
 - **Analytics (Admin only):** a per-month view of orders received, money
   received, new clients, booked value, average order value and on-time
   delivery rate; 6-month trends for money and orders; who owes money and
-  how much; top clients by money received; most requested garments. Since
-  non-admins never receive money data from the database, there is nothing
-  for them to see here even in theory, so the tab is theirs alone.
+  how much; top clients by money received; most requested garments; plus
+  inventory stock value and a "reorder soon" list. Since non-admins never
+  receive money data from the database, there is nothing for them to see
+  here even in theory, so the tab is theirs alone.
 - **Job card printing:** open an order, *Print job card*, and pin the slip
   to the garment.
 - **Search and filters:** find any order or client by name, fabric, garment or
