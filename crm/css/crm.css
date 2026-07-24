@@ -767,8 +767,10 @@ input, select, textarea { font: inherit; color: inherit; }
 .auth-wrap {
   min-height: 100vh;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 6px;
   padding: 24px 14px;
   background: var(--bg);
 }
@@ -842,6 +844,18 @@ input, select, textarea { font: inherit; color: inherit; }
 .team-row .t-name { font-weight: 600; font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .team-row .t-email { font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .team-row select { max-width: 44vw; padding: 6px 9px; border: 1px solid var(--line); border-radius: 8px; font-size: 13.5px; }
+
+/* ---------- Footer ---------- */
+
+.app-footer {
+  text-align: center;
+  padding: 14px 16px 22px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.app-footer a { color: var(--accent-dark); font-weight: 700; }
+.app-footer a:hover { text-decoration: underline; }
 
 /* ---------- Toast ---------- */
 
