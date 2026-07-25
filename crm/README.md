@@ -33,8 +33,13 @@ write, so balances cannot be tampered with either. Setting prices and
 recording payments are Admin tasks.
 
 - The **first account ever created becomes the Admin** automatically.
-- Everyone who signs up after that starts as a **Viewer** until the Admin
-  upgrades them (Menu → Team).
+- **Everyone who signs up after that is locked out until an Admin approves them.**
+  A new sign-up lands in a *pending* state: they can sign in, but the database
+  returns them no clients, orders, photos, inventory, settings or invoices at
+  all, and the app shows a "waiting for approval" screen. The Admin sees a red
+  count on the Menu button and approves (as Staff, Viewer or Admin) or rejects
+  them in Menu → Team. This stops anyone who finds the web address from
+  registering and reading your client list.
 - These rules are enforced by row-level security in the database, not just
   by hiding buttons, so they hold even outside the app.
 

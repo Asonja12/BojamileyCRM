@@ -56,7 +56,8 @@
   var ROLES = [
     ["admin", "Admin (full access)"],
     ["staff", "Staff (can add and edit)"],
-    ["viewer", "Viewer (read only)"]
+    ["viewer", "Viewer (read only)"],
+    ["pending", "Pending (no access)"]
   ];
 
   // Standard dress sizes from the studio size chart. Stored as
@@ -362,19 +363,33 @@
   var myUserId = null;
 
   function show(id) {
-    ["loadingView", "authView", "app"].forEach(function (v) {
+    ["loadingView", "authView", "pendingView", "app"].forEach(function (v) {
       document.getElementById(v).hidden = v !== id;
     });
   }
 
+  // An account is worthless until an admin approves it: the database refuses
+  // to hand a "pending" user any business data, so check the role first and
+  // never even attempt to load.
   function enterApp(session) {
     myUserId = session.user.id;
-    loadAll().then(function () {
-      show("app");
-      renderAll();
+    show("loadingView");
+    sb.from("profiles").select("*").eq("id", myUserId).then(function (res) {
+      if (res.error) throw res.error;
+      var mine = (res.data || [])[0];
+      me = mine ? rowToProfile(mine) : null;
+      if (!me || me.role === "pending") {
+        $("#pendingWho").textContent = me ? (me.fullName || me.email) : "";
+        show("pendingView");
+        return;
+      }
+      return loadAll().then(function () {
+        show("app");
+        renderAll();
+      });
     }).catch(function (e) {
       show("authView");
-      fail(e, "Could not load data");
+      fail(e, "Could not sign you in");
     });
   }
 
@@ -449,6 +464,10 @@
     $all("[data-needs-edit]").forEach(function (el) { el.style.display = canEdit() ? "" : "none"; });
     $("#analyticsTab").hidden = !isAdmin();
     $("#invoicesTab").hidden = !isAdmin();
+    // unmissable badge when people are waiting to be let in
+    var waiting = isAdmin() ? db.profiles.filter(function (p) { return p.role === "pending"; }).length : 0;
+    $("#menuBtn").innerHTML = "&#9881; Menu" +
+      (waiting ? ' <span class="menu-badge">' + waiting + "</span>" : "");
     renderDashboard();
     renderOrders();
     renderClients();
@@ -2492,7 +2511,34 @@
   function showSettings() {
     var roleLabel = { admin: "Admin", staff: "Staff", viewer: "Viewer" }[me ? me.role : "viewer"];
 
-    var teamRows = db.profiles.map(function (p) {
+    var pending = db.profiles.filter(function (p) { return p.role === "pending"; });
+    var approved = db.profiles.filter(function (p) { return p.role !== "pending"; });
+
+    var pendingBlock = "";
+    if (isAdmin() && pending.length) {
+      pendingBlock =
+        '<h3 class="section-title">⏳ Waiting for approval (' + pending.length + ")</h3>" +
+        '<p style="font-size:13.5px;color:var(--muted);margin-bottom:6px">These people signed up but can see nothing yet. Approve only people you know.</p>' +
+        pending.map(function (p) {
+          return (
+            '<div class="pending-row">' +
+              "<div class=\"pending-who\"><div class=\"t-name\">" + esc(p.fullName || "(no name)") + "</div>" +
+              '<div class="t-email">' + esc(p.email) + "</div></div>" +
+              '<div class="pending-actions">' +
+                '<select data-approve-role="' + p.id + '">' +
+                  '<option value="staff">Staff</option>' +
+                  '<option value="viewer">Viewer</option>' +
+                  '<option value="admin">Admin</option>' +
+                "</select>" +
+                '<button class="btn btn-primary btn-sm" data-approve-user="' + p.id + '">Approve</button>' +
+                '<button class="btn btn-danger btn-sm" data-delete-user="' + p.id + '">Reject</button>' +
+              "</div>" +
+            "</div>"
+          );
+        }).join("");
+    }
+
+    var teamRows = approved.map(function (p) {
       var isSelf = me && p.id === me.id;
       var select = isAdmin()
         ? '<select data-role-for="' + p.id + '"' + (isSelf ? " disabled title=\"You cannot change your own role\"" : "") + ">" +
@@ -2529,9 +2575,11 @@
             "</div>"
           : "") +
 
+        pendingBlock +
+
         '<h3 class="section-title">👥 Team</h3>' +
         (isAdmin()
-          ? '<p style="font-size:13.5px;color:var(--muted);margin-bottom:6px">New sign-ups start as Viewers. Set each person\'s access level here; changes apply immediately.</p>'
+          ? '<p style="font-size:13.5px;color:var(--muted);margin-bottom:6px">New sign-ups can see nothing until you approve them. Set each person\'s access level here; changes apply immediately.</p>'
           : '<p style="font-size:13.5px;color:var(--muted);margin-bottom:6px">Only the Admin can change roles.</p>') +
         teamRows +
 
@@ -2571,8 +2619,20 @@
       if (res.error) return fail(res.error, "Could not delete user");
       db.profiles = db.profiles.filter(function (x) { return x.id !== userId; });
       toast("Account deleted");
+      renderAll();   // refreshes the waiting-approval badge on the Menu button
       showSettings();
     });
+  }
+
+  function approveUser(userId) {
+    if (!isAdmin()) return;
+    var sel = $('[data-approve-role="' + userId + '"]');
+    var role = sel ? sel.value : "staff";
+    var p = null;
+    db.profiles.forEach(function (x) { if (x.id === userId) p = x; });
+    if (!p) return;
+    if (!confirm("Give " + (p.fullName || p.email) + " " + role + " access to the studio's data?")) return;
+    changeRole(userId, role);
   }
 
   function changeRole(userId, role) {
@@ -2581,6 +2641,7 @@
       var saved = rowToProfile(res.data);
       db.profiles = db.profiles.map(function (p) { return p.id === saved.id ? saved : p; });
       toast((saved.fullName || saved.email) + " is now " + saved.role);
+      renderAll();   // refreshes the waiting-approval badge on the Menu button
       showSettings();
     });
   }
@@ -2610,7 +2671,7 @@
   document.addEventListener("click", function (e) {
     var t = e.target;
 
-    var el = t.closest("[data-tab],[data-action],[data-order-filter],[data-open-order],[data-open-client],[data-advance-order],[data-edit-client],[data-delete-client],[data-new-order-for],[data-edit-order],[data-delete-order],[data-set-status],[data-del-payment],[data-print-order],[data-modal-overlay],[data-an-shift],[data-delete-user],[data-inv-cat],[data-open-item],[data-edit-item],[data-delete-item],[data-stock-in],[data-stock-out],[data-add-photo],[data-open-photo],[data-delete-photo],[data-back-to],[data-open-invoice],[data-invoice-order],[data-invoice-client],[data-pick-invoice-client],[data-add-line],[data-del-line],[data-delete-invoice],[data-invoice-paid],[data-invoice-unpaid],[data-share-invoice],[data-download-invoice]");
+    var el = t.closest("[data-tab],[data-action],[data-order-filter],[data-open-order],[data-open-client],[data-advance-order],[data-edit-client],[data-delete-client],[data-new-order-for],[data-edit-order],[data-delete-order],[data-set-status],[data-del-payment],[data-print-order],[data-modal-overlay],[data-an-shift],[data-delete-user],[data-inv-cat],[data-open-item],[data-edit-item],[data-delete-item],[data-stock-in],[data-stock-out],[data-add-photo],[data-open-photo],[data-delete-photo],[data-back-to],[data-open-invoice],[data-invoice-order],[data-invoice-client],[data-pick-invoice-client],[data-add-line],[data-del-line],[data-delete-invoice],[data-invoice-paid],[data-invoice-unpaid],[data-share-invoice],[data-download-invoice],[data-approve-user]");
     if (!el) return;
 
     if (el.hasAttribute("data-open-invoice")) { showInvoiceDoc(el.getAttribute("data-open-invoice")); return; }
@@ -2653,6 +2714,11 @@
 
     if (el.hasAttribute("data-delete-user")) {
       deleteUser(el.getAttribute("data-delete-user"));
+      return;
+    }
+
+    if (el.hasAttribute("data-approve-user")) {
+      approveUser(el.getAttribute("data-approve-user"));
       return;
     }
 
@@ -2731,7 +2797,13 @@
       case "invoice-settings": showInvoiceSettings(); break;
       case "open-settings": showSettings(); break;
       case "export-data": exportData(); break;
-      case "sign-out": signOut(); break;
+      case "sign-out": e.preventDefault(); signOut(); break;
+      case "recheck-approval":
+        sb.auth.getSession().then(function (r) {
+          var s = r.data ? r.data.session : null;
+          if (s) enterApp(s); else show("authView");
+        });
+        break;
       case "go-orders": switchTab("orders"); break;
       case "show-signup":
         e.preventDefault();
