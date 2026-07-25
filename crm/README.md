@@ -76,6 +76,23 @@ Internet is required since data lives in the cloud.
   Quantities are visible to everyone (staff need them to work); **cost and
   stock value are Admin-only**, enforced by the database exactly like order
   prices. Staff can add/edit items and adjust stock; only the Admin deletes.
+- **Photos:** attach pictures to an order (style reference, fabric, fitting,
+  finished piece — each tagged) and to inventory items. The tailor can see
+  exactly what to make instead of working from memory, and finished shots build
+  up a portfolio you can reuse on Instagram. Photos are shrunk automatically
+  before upload so they stay quick on mobile data, are stored in a **private**
+  bucket (served only through short-lived signed links), and print on the job
+  card. Visible to the whole team — staff need the reference to sew. Staff can
+  add photos and remove their own; the Admin can remove any.
+- **Invoices (Admin only):** build an invoice straight from an order, or from a
+  client by ticking which of her orders to combine onto one bill. Lines are
+  editable, with optional discount, deposit already paid, due date and terms.
+  Each invoice gets a number (INV-001...) from the database and **snapshots** the
+  amounts and client details, so an invoice already given to a client never
+  changes if the order is edited later. Print or save as PDF, or send the summary
+  on WhatsApp. Your business address and bank account are set once in
+  Menu → Invoice details and print on every invoice; they live in an Admin-only
+  table, so staff never see them.
 - **Team:** the Admin manages who has what access from the Menu.
 - **Analytics (Admin only):** a per-month view of orders received, money
   received, new clients, booked value, average order value and on-time
