@@ -1077,6 +1077,16 @@ input, select, textarea { font: inherit; color: inherit; }
   .form-grid { grid-template-columns: 1fr; }
   .detail-grid { grid-template-columns: 1fr; }
   .modal-overlay { padding: 10px 8px; }
+  /* Modal action buttons: neat rows of two instead of a ragged wrap.
+     A lone trailing button grows to the full width by itself. */
+  .modal-actions { flex-wrap: wrap; justify-content: stretch; }
+  .modal-actions .spacer { display: none; }
+  .modal-actions .btn {
+    flex: 1 1 calc(50% - 4px);
+    min-width: 0;
+    white-space: normal;
+    justify-content: center;
+  }
   .tabs { padding: 8px 8px 0; }
   .tab { padding: 9px 11px 11px; font-size: 14px; }
   .main { padding: 14px 10px 90px; }
@@ -1084,18 +1094,51 @@ input, select, textarea { font: inherit; color: inherit; }
 
 /* ---------- Print (job card) ---------- */
 
+@page { margin: 12mm; }
+
 @media print {
-  body * { visibility: hidden; }
-  .modal-overlay, .modal-overlay * { visibility: visible; }
-  .modal-overlay { position: static; padding: 0; background: none; overflow: visible; }
-  .modal-card { box-shadow: none; max-width: 100%; border: none; animation: none; }
+  /* The app shell must be display:none, NOT visibility:hidden. Hidden
+     elements still occupy their full height, which pushed the document
+     onto page 3 behind two blank pages. */
+  #app, #authView, #loadingView, #toastRoot { display: none !important; }
+
+  html, body {
+    background: #fff !important;
+    height: auto !important;
+    overflow: visible !important;   /* beats the inline overflow:hidden set when a modal opens */
+  }
+
+  #modalRoot .modal-overlay {
+    position: static !important;
+    display: block !important;
+    inset: auto;
+    padding: 0;
+    margin: 0;
+    background: none;
+    overflow: visible !important;
+  }
+
+  .modal-card {
+    box-shadow: none;
+    max-width: 100%;
+    width: 100%;
+    margin: 0;
+    border: none;
+    border-radius: 0;
+    animation: none;
+  }
+
+  .modal-head { padding: 0 0 6px; }
+  .modal-body { padding: 0 !important; }
+
   .modal-close, .modal-actions, .stepper, .pay-form, .no-print { display: none !important; }
+
   /* photos belong on the job card: let the strip wrap instead of scrolling */
   .photo-strip { overflow: visible !important; flex-wrap: wrap; }
   .photo-thumb { width: 150px; height: 150px; break-inside: avoid; }
+
   /* invoices print as a clean document, not as an app modal */
-  .modal-card { border-radius: 0; }
-  .modal-body { padding: 0 !important; }
-  .invoice-doc { font-size: 12.5pt; }
-  .inv-items { font-size: 11.5pt; }
+  .invoice-doc { font-size: 11.5pt; }
+  .inv-items { font-size: 10.5pt; }
+  .inv-totals, .inv-pay-details, .inv-head { break-inside: avoid; }
 }

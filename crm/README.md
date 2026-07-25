@@ -89,10 +89,14 @@ Internet is required since data lives in the cloud.
   editable, with optional discount, deposit already paid, due date and terms.
   Each invoice gets a number (INV-001...) from the database and **snapshots** the
   amounts and client details, so an invoice already given to a client never
-  changes if the order is edited later. Print or save as PDF, or send the summary
-  on WhatsApp. Your business address and bank account are set once in
-  Menu → Invoice details and print on every invoice; they live in an Admin-only
-  table, so staff never see them.
+  changes if the order is edited later. **Download a real PDF**, print it, or
+  **send the PDF on WhatsApp**: on a phone this opens the native share sheet with
+  the file attached; on desktop the PDF downloads and WhatsApp opens with the
+  message ready, since WhatsApp links cannot carry a file on their own.
+  Your business address and bank account are set once in
+  Menu → 🧾 Invoice details and print on every invoice; they live in an Admin-only
+  table, so staff never see them. Amounts print as `NGN 35,000` in the PDF because
+  the PDF fonts have no ₦ glyph.
 - **Team:** the Admin manages who has what access from the Menu.
 - **Analytics (Admin only):** a per-month view of orders received, money
   received, new clients, booked value, average order value and on-time
