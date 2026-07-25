@@ -857,6 +857,15 @@ input, select, textarea { font: inherit; color: inherit; }
 .list-row .lr-value { font-weight: 700; white-space: nowrap; }
 .list-row .lr-value.owed { color: var(--red); }
 
+/* a standalone navigation button inside the Menu, clear of the form above it */
+.menu-link {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.menu-link .hint { margin-top: 6px; text-align: center; }
+
 /* ---------- Invoices ---------- */
 
 /* builder */
