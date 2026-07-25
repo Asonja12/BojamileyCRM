@@ -2517,7 +2517,7 @@
             "</div>" +
             '<div class="modal-actions" style="border:none;margin-top:10px;padding-top:0"><span class="spacer"></span>' +
             '<button type="submit" class="btn btn-primary btn-sm">Save Settings</button></div></form>' +
-            '<button class="btn btn-subtle btn-sm" data-action="invoice-settings">🧾 Invoice details &amp; bank account</button>'
+            '<button class="btn btn-subtle btn-sm btn-block" style="margin-top:16px" data-action="invoice-settings">🧾 Invoice details &amp; bank account</button>'
           : "") +
 
         '<h3 class="section-title">👥 Team</h3>' +
