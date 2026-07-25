@@ -48,7 +48,22 @@
         <p class="auth-switch">Already have an account? <a href="#" data-action="show-signin">Sign in</a></p>
       </form>
 
-      <p class="auth-note">The first account created becomes the Admin. Everyone who joins later starts as a Viewer until the Admin upgrades them in Settings.</p>
+      <p class="auth-note">Clients, measurements, orders and payments, all in one place. New accounts stay locked until an Admin approves them.</p>
+    </div>
+  </div>
+
+  <!-- Signed in but not yet approved by an admin -->
+  <div id="pendingView" class="auth-wrap" hidden>
+    <div class="auth-card" style="text-align:center">
+      <img src="img/logo.svg" alt="Bojamiley logo" class="auth-logo">
+      <h1 class="auth-title">Waiting for approval</h1>
+      <p class="auth-sub" id="pendingWho"></p>
+      <p style="font-size:14px;color:var(--muted);margin-bottom:18px">
+        Your account has been created, but an Admin must approve it before you can
+        see any studio information. Please check back shortly.
+      </p>
+      <button class="btn btn-primary btn-block" data-action="recheck-approval">Check again</button>
+      <p class="auth-switch"><a href="#" data-action="sign-out">Sign out</a></p>
     </div>
   </div>
 
