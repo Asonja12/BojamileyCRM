@@ -1310,7 +1310,7 @@
           (v.status !== "paid"
             ? '<button class="btn btn-ghost btn-sm" data-invoice-paid="' + v.id + '">✓ Mark paid</button>'
             : '<button class="btn btn-ghost btn-sm" data-invoice-unpaid="' + v.id + '">Mark unpaid</button>') +
-          (wa ? '<button class="btn btn-primary" data-share-invoice="' + v.id + '">💬 Send PDF on WhatsApp</button>' : "") +
+          '<button class="btn btn-primary" data-share-invoice="' + v.id + '">💬 Send PDF on WhatsApp</button>' +
         "</div>" +
       "</div>"
     );
@@ -1471,8 +1471,10 @@
   }
 
   // WhatsApp's link API cannot carry a file, so we hand the real PDF to the
-  // phone's native share sheet (which lists WhatsApp). Desktop and older
-  // browsers fall back to downloading the PDF plus a prefilled chat.
+  // phone's native share sheet, where WhatsApp appears as a target and the
+  // contact is picked there (so this works even with no phone number saved).
+  // Desktop and older browsers fall back to downloading the PDF plus a
+  // prefilled chat.
   function shareInvoice(id) {
     var v = invoiceById(id);
     if (!v) return;
@@ -1483,23 +1485,27 @@
     var file = null;
     try {
       file = new File([blob], invoiceFileName(v), { type: "application/pdf" });
-    } catch (e) { /* File constructor unavailable */ }
+    } catch (e) { /* File constructor unavailable on this browser */ }
 
     if (file && navigator.canShare && navigator.canShare({ files: [file] }) && navigator.share) {
       navigator.share({
         files: [file],
         title: v.number,
         text: invoiceMessage(v)
-      }).catch(function () { /* user dismissed the sheet */ });
+      }).catch(function () { /* user dismissed the share sheet */ });
       return;
     }
 
-    // fallback: save the file, then open WhatsApp so it can be attached
+    // Fallback: save the PDF, then open the chat so it can be attached.
     downloadInvoice(id);
     var wa = phoneDigits(v.clientPhone);
-    toast("PDF saved. Attach it in WhatsApp.");
+    var msg = encodeURIComponent(invoiceMessage(v));
     if (wa) {
-      window.open("https://wa.me/" + wa + "?text=" + encodeURIComponent(invoiceMessage(v)), "_blank", "noopener");
+      toast("PDF saved — attach it in the WhatsApp chat");
+      window.open("https://wa.me/" + wa + "?text=" + msg, "_blank", "noopener");
+    } else {
+      toast("PDF saved — open WhatsApp and attach it");
+      window.open("https://wa.me/?text=" + msg, "_blank", "noopener");
     }
   }
 
@@ -2517,7 +2523,10 @@
             "</div>" +
             '<div class="modal-actions" style="border:none;margin-top:10px;padding-top:0"><span class="spacer"></span>' +
             '<button type="submit" class="btn btn-primary btn-sm">Save Settings</button></div></form>' +
-            '<button class="btn btn-subtle btn-sm btn-block" style="margin-top:16px" data-action="invoice-settings">🧾 Invoice details &amp; bank account</button>'
+            '<div class="menu-link">' +
+              '<button class="btn btn-ghost btn-block" data-action="invoice-settings">🧾 Invoice details &amp; bank account</button>' +
+              '<div class="hint">Address and bank account printed on every invoice.</div>' +
+            "</div>"
           : "") +
 
         '<h3 class="section-title">👥 Team</h3>' +
