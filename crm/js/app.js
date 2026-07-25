@@ -1137,8 +1137,6 @@
         : '<p style="color:var(--muted);font-size:14px">This client has no orders yet — add lines by hand below.</p>') +
       "</div>";
 
-    var d = new Date(); d.setDate(d.getDate() + 7);
-    var dueDefault = d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
     var notes = (db.invoiceSettings && db.invoiceSettings.defaultNotes) || "";
 
     openModal(
@@ -1154,7 +1152,6 @@
           '<div class="field"><label for="inv_discount">Discount</label><input id="inv_discount" type="number" min="0" step="any" inputmode="decimal" value="0"></div>' +
           '<div class="field"><label for="inv_paid">Already paid</label><input id="inv_paid" type="number" min="0" step="any" inputmode="decimal" value="' + esc(paid) + '"></div>' +
           '<div class="field"><label for="inv_issue">Invoice date</label><input id="inv_issue" type="date" value="' + esc(todayISO()) + '"></div>' +
-          '<div class="field"><label for="inv_due">Payment due</label><input id="inv_due" type="date" value="' + esc(dueDefault) + '"></div>' +
           '<div class="field full"><label for="inv_notes">Notes / terms</label><textarea id="inv_notes" placeholder="e.g. 50% deposit required. Balance due on collection.">' + esc(notes) + "</textarea></div>" +
         "</div>" +
         '<div class="inv-totals-live" id="invTotals"></div>' +
@@ -1220,7 +1217,7 @@
       client_phone: client ? (client.phone || "") : "",
       client_address: client ? (client.address || "") : "",
       issue_date: $("#inv_issue").value || todayISO(),
-      due_date: $("#inv_due").value || null,
+      due_date: null,
       items: lines,
       subtotal: subtotal, discount: discount, total: total,
       amount_paid: paid, balance: total - paid,
@@ -1271,7 +1268,6 @@
             '<div class="inv-meta"><div class="inv-word">INVOICE</div>' +
               "<div><strong>" + esc(v.number) + "</strong></div>" +
               "<div>Date: " + esc(fmtDateShort(v.issueDate)) + "</div>" +
-              (v.dueDate ? "<div>Due: " + esc(fmtDateShort(v.dueDate)) + "</div>" : "") +
             "</div>" +
           "</div>" +
 
@@ -1303,30 +1299,228 @@
           '<div class="inv-thanks">Thank you for your patronage.</div>' +
         "</div>" +
 
+        (payBlock ? "" :
+          '<div class="notice no-print" style="margin-top:12px">Your bank account is not set, so clients cannot see where to pay. ' +
+          '<button class="btn btn-subtle btn-sm" data-action="invoice-settings" style="margin-top:6px">Set it now</button></div>') +
+
         '<div class="modal-actions no-print">' +
-          '<button class="btn btn-ghost btn-sm" data-print-order>🖨 Print / Save PDF</button>' +
-          (wa ? '<a class="btn btn-ghost btn-sm" href="' + invoiceWaLink(v) + '" target="_blank" rel="noopener">💬 Send on WhatsApp</a>' : "") +
+          '<button class="btn btn-ghost btn-sm" data-download-invoice="' + v.id + '">⬇ Download PDF</button>' +
+          '<button class="btn btn-ghost btn-sm" data-print-order>🖨 Print</button>' +
           '<button class="btn btn-ghost btn-sm" data-delete-invoice="' + v.id + '">Delete</button>' +
-          '<span class="spacer"></span>' +
           (v.status !== "paid"
-            ? '<button class="btn btn-primary" data-invoice-paid="' + v.id + '">✓ Mark paid</button>'
-            : '<button class="btn btn-ghost" data-invoice-unpaid="' + v.id + '">Mark unpaid</button>') +
+            ? '<button class="btn btn-ghost btn-sm" data-invoice-paid="' + v.id + '">✓ Mark paid</button>'
+            : '<button class="btn btn-ghost btn-sm" data-invoice-unpaid="' + v.id + '">Mark unpaid</button>') +
+          (wa ? '<button class="btn btn-primary" data-share-invoice="' + v.id + '">💬 Send PDF on WhatsApp</button>' : "") +
         "</div>" +
       "</div>"
     );
   }
 
-  function invoiceWaLink(v) {
+  /* ---- PDF ----------------------------------------------------------
+     Drawn with jsPDF rather than screenshotting the page, so the text
+     stays crisp and selectable and the file stays small (~10 KB).
+     -------------------------------------------------------------------- */
+
+  function invoicePdf(v) {
+    var jsPDFctor = window.jspdf && window.jspdf.jsPDF;
+    if (!jsPDFctor) return null;
+    var s = db.invoiceSettings || {};
+    var doc = new jsPDFctor({ unit: "mm", format: "a4" });
+    var L = 15, R = 195, y = 18;
+
+    // jsPDF's built-in fonts are WinAnsi-encoded and have no ₦ (or ₵) glyph:
+    // printing it raw comes out as "¦". Fall back to the ISO code for those.
+    var PDF_CUR = { "₦": "NGN ", "₵": "GHS ", "GH₵": "GHS ", "₹": "INR ", "₱": "PHP " };
+    var rawCur = db.settings.currency || "";
+    var cur = PDF_CUR[rawCur] !== undefined ? PDF_CUR[rawCur]
+            : (/^[\x20-\x7E£€¥]*$/.test(rawCur) ? rawCur : rawCur.replace(/[^\x20-\x7E£€¥]/g, "") + " ");
+
+    function amt(n) {
+      return cur + Number(n || 0).toLocaleString("en-US", { maximumFractionDigits: 2 });
+    }
+    function line() { doc.setDrawColor(232, 221, 210); doc.line(L, y, R, y); }
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(17);
+    doc.setTextColor(185, 106, 7);
+    doc.text(db.settings.businessName || "Bojamiley", L, y);
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(138, 125, 114);
+    var by = y + 5;
+    [s.businessAddress, s.businessPhone, s.businessEmail].forEach(function (t) {
+      if (t) { doc.text(String(t), L, by); by += 4; }
+    });
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(20);
+    doc.setTextColor(185, 106, 7);
+    doc.text("INVOICE", R, y, { align: "right" });
+    doc.setFontSize(10);
+    doc.setTextColor(43, 35, 32);
+    doc.text(v.number, R, y + 6, { align: "right" });
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(138, 125, 114);
+    doc.text(fmtDateShort(v.issueDate), R, y + 11, { align: "right" });
+
+    y = Math.max(by, y + 15) + 3;
+    doc.setDrawColor(244, 151, 33);
+    doc.setLineWidth(0.6);
+    doc.line(L, y, R, y);
+    doc.setLineWidth(0.2);
+    y += 8;
+
+    doc.setFontSize(8);
+    doc.setTextColor(138, 125, 114);
+    doc.text("BILLED TO", L, y);
+    y += 5;
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.setTextColor(43, 35, 32);
+    doc.text(v.clientName || "-", L, y);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(90, 80, 72);
+    [v.clientPhone, v.clientAddress].forEach(function (t) {
+      if (t) { y += 4.5; doc.text(String(t), L, y); }
+    });
+
+    // items table
+    y += 9;
+    doc.setFontSize(8);
+    doc.setTextColor(138, 125, 114);
+    doc.text("DESCRIPTION", L, y);
+    doc.text("QTY", 130, y, { align: "right" });
+    doc.text("PRICE", 158, y, { align: "right" });
+    doc.text("AMOUNT", R, y, { align: "right" });
+    y += 2.5; line(); y += 5;
+
+    doc.setFontSize(10);
+    doc.setTextColor(43, 35, 32);
+    (v.items || []).forEach(function (it) {
+      var wrapped = doc.splitTextToSize(String(it.description || ""), 108);
+      if (y > 250) { doc.addPage(); y = 20; }
+      doc.text(wrapped, L, y);
+      doc.text(String(it.qty), 130, y, { align: "right" });
+      doc.text(amt(it.unit_price), 158, y, { align: "right" });
+      doc.text(amt(it.amount), R, y, { align: "right" });
+      y += Math.max(wrapped.length * 4.6, 5) + 2.5;
+      line(); y += 5;
+    });
+
+    // totals
+    var tx = 130, ty = y + 2;
+    function row(label, value, bold) {
+      doc.setFont("helvetica", bold ? "bold" : "normal");
+      doc.setFontSize(bold ? 11 : 10);
+      doc.text(label, tx, ty);
+      doc.text(value, R, ty, { align: "right" });
+      ty += bold ? 6.5 : 5.5;
+    }
+    row("Subtotal", amt(v.subtotal));
+    if (v.discount > 0) row("Discount", "-" + amt(v.discount));
+    row("Total", amt(v.total), true);
+    if (v.amountPaid > 0) row("Paid", amt(v.amountPaid));
+    row("Balance due", amt(v.balance), true);
+    y = ty + 4;
+
+    if (v.notes) {
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.setTextColor(138, 125, 114);
+      var nl = doc.splitTextToSize(String(v.notes), R - L);
+      doc.text(nl, L, y);
+      y += nl.length * 4.2 + 4;
+    }
+
+    if (s.bankName || s.bankAccountNumber) {
+      doc.setFillColor(253, 238, 221);
+      var boxH = 10 + (s.bankName ? 5 : 0) + (s.bankAccountName ? 5 : 0) + (s.bankAccountNumber ? 6 : 0);
+      doc.roundedRect(L, y, R - L, boxH, 2, 2, "F");
+      var byy = y + 6;
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8);
+      doc.setTextColor(185, 106, 7);
+      doc.text("PAYMENT DETAILS", L + 4, byy);
+      doc.setTextColor(43, 35, 32);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      if (s.bankName) { byy += 5; doc.text(String(s.bankName), L + 4, byy); }
+      if (s.bankAccountName) { byy += 5; doc.text(String(s.bankAccountName), L + 4, byy); }
+      if (s.bankAccountNumber) {
+        byy += 6;
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(13);
+        doc.text(String(s.bankAccountNumber), L + 4, byy);
+      }
+      y += boxH + 6;
+    }
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(138, 125, 114);
+    doc.text("Thank you for your patronage.", 105, Math.min(y + 2, 285), { align: "center" });
+
+    return doc;
+  }
+
+  function invoiceFileName(v) {
+    return (v.number + "-" + (v.clientName || "invoice")).replace(/[^\w\-]+/g, "-") + ".pdf";
+  }
+
+  // WhatsApp's link API cannot carry a file, so we hand the real PDF to the
+  // phone's native share sheet (which lists WhatsApp). Desktop and older
+  // browsers fall back to downloading the PDF plus a prefilled chat.
+  function shareInvoice(id) {
+    var v = invoiceById(id);
+    if (!v) return;
+    var doc = invoicePdf(v);
+    if (!doc) { toast("PDF engine did not load", true); return; }
+
+    var blob = doc.output("blob");
+    var file = null;
+    try {
+      file = new File([blob], invoiceFileName(v), { type: "application/pdf" });
+    } catch (e) { /* File constructor unavailable */ }
+
+    if (file && navigator.canShare && navigator.canShare({ files: [file] }) && navigator.share) {
+      navigator.share({
+        files: [file],
+        title: v.number,
+        text: invoiceMessage(v)
+      }).catch(function () { /* user dismissed the sheet */ });
+      return;
+    }
+
+    // fallback: save the file, then open WhatsApp so it can be attached
+    downloadInvoice(id);
+    var wa = phoneDigits(v.clientPhone);
+    toast("PDF saved. Attach it in WhatsApp.");
+    if (wa) {
+      window.open("https://wa.me/" + wa + "?text=" + encodeURIComponent(invoiceMessage(v)), "_blank", "noopener");
+    }
+  }
+
+  function downloadInvoice(id) {
+    var v = invoiceById(id);
+    if (!v) return;
+    var doc = invoicePdf(v);
+    if (!doc) { toast("PDF engine did not load", true); return; }
+    doc.save(invoiceFileName(v));
+  }
+
+  function invoiceMessage(v) {
     var s = db.invoiceSettings || {};
     var lines = [
-      "Hello " + (v.clientName || "").split(" ")[0] + ", here is your invoice from " + db.settings.businessName + ".",
+      "Hello " + String(v.clientName || "").split(" ")[0] + ", here is your invoice from " + db.settings.businessName + ".",
       "",
       "Invoice: " + v.number,
       "Total: " + money(v.total)
     ];
     if (v.amountPaid > 0) lines.push("Paid: " + money(v.amountPaid));
     lines.push("Balance due: " + money(v.balance));
-    if (v.dueDate) lines.push("Due by: " + fmtDateShort(v.dueDate));
     if (s.bankName || s.bankAccountNumber) {
       lines.push("", "Payment details:");
       if (s.bankName) lines.push(s.bankName);
@@ -1334,7 +1528,7 @@
       if (s.bankAccountNumber) lines.push(s.bankAccountNumber);
     }
     lines.push("", "Thank you!");
-    return "https://wa.me/" + phoneDigits(v.clientPhone) + "?text=" + encodeURIComponent(lines.join("\n"));
+    return lines.join("\n");
   }
 
   function setInvoicePaid(id, paidInFull) {
@@ -2407,7 +2601,7 @@
   document.addEventListener("click", function (e) {
     var t = e.target;
 
-    var el = t.closest("[data-tab],[data-action],[data-order-filter],[data-open-order],[data-open-client],[data-advance-order],[data-edit-client],[data-delete-client],[data-new-order-for],[data-edit-order],[data-delete-order],[data-set-status],[data-del-payment],[data-print-order],[data-modal-overlay],[data-an-shift],[data-delete-user],[data-inv-cat],[data-open-item],[data-edit-item],[data-delete-item],[data-stock-in],[data-stock-out],[data-add-photo],[data-open-photo],[data-delete-photo],[data-back-to],[data-open-invoice],[data-invoice-order],[data-invoice-client],[data-pick-invoice-client],[data-add-line],[data-del-line],[data-delete-invoice],[data-invoice-paid],[data-invoice-unpaid]");
+    var el = t.closest("[data-tab],[data-action],[data-order-filter],[data-open-order],[data-open-client],[data-advance-order],[data-edit-client],[data-delete-client],[data-new-order-for],[data-edit-order],[data-delete-order],[data-set-status],[data-del-payment],[data-print-order],[data-modal-overlay],[data-an-shift],[data-delete-user],[data-inv-cat],[data-open-item],[data-edit-item],[data-delete-item],[data-stock-in],[data-stock-out],[data-add-photo],[data-open-photo],[data-delete-photo],[data-back-to],[data-open-invoice],[data-invoice-order],[data-invoice-client],[data-pick-invoice-client],[data-add-line],[data-del-line],[data-delete-invoice],[data-invoice-paid],[data-invoice-unpaid],[data-share-invoice],[data-download-invoice]");
     if (!el) return;
 
     if (el.hasAttribute("data-open-invoice")) { showInvoiceDoc(el.getAttribute("data-open-invoice")); return; }
@@ -2432,6 +2626,8 @@
       recalcInvoice();
       return;
     }
+    if (el.hasAttribute("data-share-invoice")) { shareInvoice(el.getAttribute("data-share-invoice")); return; }
+    if (el.hasAttribute("data-download-invoice")) { downloadInvoice(el.getAttribute("data-download-invoice")); return; }
     if (el.hasAttribute("data-delete-invoice")) { deleteInvoice(el.getAttribute("data-delete-invoice")); return; }
     if (el.hasAttribute("data-invoice-paid")) { setInvoicePaid(el.getAttribute("data-invoice-paid"), true); return; }
     if (el.hasAttribute("data-invoice-unpaid")) { setInvoicePaid(el.getAttribute("data-invoice-unpaid"), false); return; }
