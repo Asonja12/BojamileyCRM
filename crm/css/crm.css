@@ -604,6 +604,99 @@ input, select, textarea { font: inherit; color: inherit; }
 .stock-actions { display: flex; gap: 8px; margin: 4px 0 2px; }
 .stock-actions .btn { flex: 1; }
 
+/* photos */
+.photo-strip {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  margin-top: 8px;
+  scrollbar-width: thin;
+}
+
+.photo-thumb {
+  position: relative;
+  flex: 0 0 auto;
+  width: 108px;
+  height: 108px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--surface-2);
+}
+
+.photo-thumb:hover { border-color: var(--accent); }
+
+.photo-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+.photo-thumb.photo-broken::after {
+  content: "🖼";
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  color: var(--muted);
+}
+
+.photo-kind-tag {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 3px 6px;
+  background: rgba(20, 14, 10, 0.66);
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.photo-add {
+  flex: 0 0 auto;
+  width: 108px;
+  height: 108px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.photo-add span { font-size: 20px; line-height: 1; color: var(--accent); }
+.photo-add:hover { border-color: var(--accent); color: var(--ink); }
+
+.photo-preview {
+  display: block;
+  width: 100%;
+  max-height: 240px;
+  object-fit: contain;
+  margin-top: 10px;
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+
+.photo-full {
+  display: block;
+  width: 100%;
+  max-height: 68vh;
+  object-fit: contain;
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+
 /* payments */
 
 .pay-table { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 14.5px; }
@@ -622,9 +715,11 @@ input, select, textarea { font: inherit; color: inherit; }
   font-weight: 700;
 }
 
-.pay-form { display: flex; gap: 8px; margin-top: 10px; }
-.pay-form input { flex: 1; min-width: 0; padding: 8px 12px; border: 1px solid var(--line); border-radius: 9px; }
-.pay-form .btn { flex-shrink: 0; }
+.pay-form { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+/* min-width:0 is essential: without it the number input keeps its intrinsic
+   ~245px and pushes the nowrap button outside the modal on small phones. */
+.pay-form input { flex: 1 1 130px; min-width: 0; padding: 8px 12px; border: 1px solid var(--line); border-radius: 9px; }
+.pay-form .btn { flex: 0 1 auto; }
 
 /* order rows inside client detail */
 
@@ -762,15 +857,112 @@ input, select, textarea { font: inherit; color: inherit; }
 .list-row .lr-value { font-weight: 700; white-space: nowrap; }
 .list-row .lr-value.owed { color: var(--red); }
 
+/* ---------- Invoices ---------- */
+
+/* builder */
+.inv-pick { display: flex; align-items: flex-start; gap: 8px; padding: 6px 0; font-size: 14px; }
+.inv-pick input { width: 18px; height: 18px; accent-color: var(--accent); flex: 0 0 auto; margin-top: 1px; }
+
+.inv-lines-wrap { overflow-x: auto; }
+.inv-lines { width: 100%; border-collapse: collapse; font-size: 14px; min-width: 380px; }
+.inv-lines th {
+  text-align: left;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  padding: 4px 4px 6px;
+}
+.inv-lines td { padding: 3px 3px; border-bottom: 1px solid var(--line); }
+.inv-lines input { width: 100%; min-width: 0; padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px; font-size: 14px; }
+.inv-lines .inv-qty, .inv-lines .inv-price { max-width: 76px; }
+.inv-lines .inv-line-amt { white-space: nowrap; font-weight: 600; font-size: 13.5px; }
+
+.inv-totals-live {
+  margin-top: 14px;
+  background: var(--surface-2);
+  border-radius: 10px;
+  padding: 10px 14px;
+}
+
+.inv-total-row { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; padding: 3px 0; }
+.inv-total-main { font-weight: 800; font-size: 15.5px; }
+
+/* the printable document */
+.invoice-doc { background: #fff; color: #241d19; font-size: 14px; }
+
+.inv-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding-bottom: 14px;
+  border-bottom: 2px solid var(--accent);
+}
+
+.inv-brand { display: flex; gap: 10px; align-items: flex-start; min-width: 0; }
+.inv-logo { width: 42px; height: 48px; flex: 0 0 auto; }
+.inv-biz { font-size: 18px; font-weight: 800; color: var(--accent-dark); }
+.inv-biz-line { font-size: 12.5px; color: var(--muted); }
+
+.inv-meta { text-align: right; font-size: 12.5px; }
+.inv-word { font-size: 20px; font-weight: 800; letter-spacing: 0.08em; color: var(--accent-dark); }
+
+.inv-party { margin: 14px 0; }
+.inv-party-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.inv-party-name { font-size: 16px; font-weight: 700; }
+
+.inv-items { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 13.5px; }
+.inv-items th {
+  text-align: left;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+  padding: 6px 4px;
+}
+.inv-items td { padding: 8px 4px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.inv-items .num { text-align: right; white-space: nowrap; }
+
+.inv-totals {
+  margin-top: 12px;
+  margin-left: auto;
+  max-width: 300px;
+  background: var(--surface-2);
+  border-radius: 10px;
+  padding: 10px 14px;
+  break-inside: avoid;
+}
+
+.inv-notes {
+  margin-top: 14px;
+  font-size: 13px;
+  color: var(--muted);
+  white-space: pre-wrap;
+}
+
+.inv-pay-details {
+  margin-top: 14px;
+  padding: 10px 14px;
+  background: var(--accent-soft);
+  border-radius: 10px;
+  font-size: 13.5px;
+  break-inside: avoid;
+}
+
+.inv-pay-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--accent-dark); font-weight: 700; margin-bottom: 3px; }
+.inv-acct { font-size: 17px; font-weight: 800; letter-spacing: 0.04em; }
+
+.inv-thanks { margin-top: 16px; text-align: center; font-size: 12.5px; color: var(--muted); }
+
 /* ---------- Auth screen ---------- */
 
 .auth-wrap {
   min-height: 100vh;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
   padding: 24px 14px;
   background: var(--bg);
 }
@@ -845,18 +1037,6 @@ input, select, textarea { font: inherit; color: inherit; }
 .team-row .t-email { font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .team-row select { max-width: 44vw; padding: 6px 9px; border: 1px solid var(--line); border-radius: 8px; font-size: 13.5px; }
 
-/* ---------- Footer ---------- */
-
-.app-footer {
-  text-align: center;
-  padding: 14px 16px 22px;
-  font-size: 12.5px;
-  color: var(--muted);
-}
-
-.app-footer a { color: var(--accent-dark); font-weight: 700; }
-.app-footer a:hover { text-decoration: underline; }
-
 /* ---------- Toast ---------- */
 
 #toastRoot {
@@ -910,4 +1090,12 @@ input, select, textarea { font: inherit; color: inherit; }
   .modal-overlay { position: static; padding: 0; background: none; overflow: visible; }
   .modal-card { box-shadow: none; max-width: 100%; border: none; animation: none; }
   .modal-close, .modal-actions, .stepper, .pay-form, .no-print { display: none !important; }
+  /* photos belong on the job card: let the strip wrap instead of scrolling */
+  .photo-strip { overflow: visible !important; flex-wrap: wrap; }
+  .photo-thumb { width: 150px; height: 150px; break-inside: avoid; }
+  /* invoices print as a clean document, not as an app modal */
+  .modal-card { border-radius: 0; }
+  .modal-body { padding: 0 !important; }
+  .invoice-doc { font-size: 12.5pt; }
+  .inv-items { font-size: 11.5pt; }
 }

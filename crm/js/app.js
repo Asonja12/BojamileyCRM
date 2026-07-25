@@ -74,11 +74,22 @@
   var STOCK_IN_REASONS = ["Received from supplier", "Returned to stock", "Stock count correction", "Opening stock"];
   var STOCK_OUT_REASONS = ["Used for an order", "Damaged / wastage", "Sample / giveaway", "Stock count correction"];
 
+  // What an order photo shows. Inventory photos are always "other".
+  var PHOTO_KINDS = [
+    ["style", "Style reference"],
+    ["fabric", "Fabric"],
+    ["fitting", "Fitting"],
+    ["finished", "Finished piece"],
+    ["other", "Other"]
+  ];
+  var PHOTO_MAX_EDGE = 1280;   // longest edge after compression
+  var PHOTO_QUALITY = 0.8;     // JPEG quality
+
   /* ---------- State ---------- */
 
-  var db = { settings: { businessName: "Bojamiley", currency: "₦" }, clients: [], orders: [], profiles: [], inventory: [] };
+  var db = { settings: { businessName: "Bojamiley", currency: "₦" }, clients: [], orders: [], profiles: [], inventory: [], photos: [], invoices: [], invoiceSettings: null };
   var me = null; // my profile row: { id, email, fullName, role }
-  var ui = { tab: "dashboard", orderFilter: "active", orderSearch: "", clientSearch: "", anMonth: null, invSearch: "", invCat: "all" };
+  var ui = { tab: "dashboard", orderFilter: "active", orderSearch: "", clientSearch: "", anMonth: null, invSearch: "", invCat: "all", invoiceSearch: "" };
 
   function isAdmin() { return !!me && me.role === "admin"; }
   function canEdit() { return !!me && (me.role === "admin" || me.role === "staff"); }
@@ -256,6 +267,35 @@
     };
   }
 
+  function rowToPhoto(r) {
+    return {
+      id: r.id, orderId: r.order_id, itemId: r.item_id, path: r.path,
+      kind: r.kind, caption: r.caption, createdAt: r.created_at, createdBy: r.created_by
+    };
+  }
+
+  function rowToInvoice(r) {
+    return {
+      id: r.id, number: r.number, clientId: r.client_id, orderIds: r.order_ids || [],
+      clientName: r.client_name, clientPhone: r.client_phone, clientAddress: r.client_address,
+      issueDate: r.issue_date, dueDate: r.due_date, items: r.items || [],
+      subtotal: Number(r.subtotal || 0), discount: Number(r.discount || 0),
+      total: Number(r.total || 0), amountPaid: Number(r.amount_paid || 0),
+      balance: Number(r.balance || 0), notes: r.notes, status: r.status,
+      createdAt: r.created_at
+    };
+  }
+
+  function rowToInvSettings(r) {
+    if (!r) return null;
+    return {
+      businessPhone: r.business_phone, businessAddress: r.business_address,
+      businessEmail: r.business_email, bankName: r.bank_name,
+      bankAccountName: r.bank_account_name, bankAccountNumber: r.bank_account_number,
+      defaultNotes: r.default_notes
+    };
+  }
+
   function itemToRow(it) {
     var row = {
       name: it.name, category: it.category, color: it.color, unit: it.unit,
@@ -276,7 +316,11 @@
       sb.from("client_contacts").select("*"), // rows only come back for admins
       sb.from("order_money").select("*"),     // rows only come back for admins
       sb.from("inventory_items").select(ITEM_COLS).order("name"),
-      sb.from("inventory_costs").select("*")   // rows only come back for admins
+      sb.from("inventory_costs").select("*"),  // rows only come back for admins
+      sb.from("photos").select("*").order("created_at"),
+      // both admin-only: non-admins get zero rows, never an error
+      sb.from("invoices").select("*").order("created_at", { ascending: false }),
+      sb.from("invoice_settings").select("*")
     ]).then(function (res) {
       var errs = res.filter(function (r) { return r.error; });
       if (errs.length) throw errs[0].error;
@@ -303,6 +347,9 @@
         var k = costs[it.id];
         it.unitCost = k ? Number(k.unit_cost || 0) : null; // null = hidden from this user
       });
+      db.photos = (res[8].data || []).map(rowToPhoto);
+      db.invoices = (res[9].data || []).map(rowToInvoice);
+      db.invoiceSettings = rowToInvSettings((res[10].data || [])[0]);
       me = null;
       for (var i = 0; i < db.profiles.length; i++) {
         if (db.profiles[i].id === myUserId) me = db.profiles[i];
@@ -334,7 +381,9 @@
   sb.auth.onAuthStateChange(function (event, session) {
     if (event === "SIGNED_OUT") {
       me = null; myUserId = null;
-      db.clients = []; db.orders = []; db.profiles = []; db.inventory = [];
+      db.clients = []; db.orders = []; db.profiles = []; db.inventory = []; db.photos = [];
+      db.invoices = []; db.invoiceSettings = null;
+      signedCache = {};
       closeModal();
       show("authView");
     }
@@ -399,10 +448,12 @@
     document.title = (db.settings.businessName || "Bojamiley") + " CRM";
     $all("[data-needs-edit]").forEach(function (el) { el.style.display = canEdit() ? "" : "none"; });
     $("#analyticsTab").hidden = !isAdmin();
+    $("#invoicesTab").hidden = !isAdmin();
     renderDashboard();
     renderOrders();
     renderClients();
     renderInventory();
+    renderInvoices();
     if (isAdmin()) renderAnalytics();
   }
 
@@ -609,6 +660,8 @@
           (it.notes ? '<div class="detail-item full"><div class="dt">Notes</div><div class="dd">' + esc(it.notes) + "</div></div>" : "") +
         "</div>" +
 
+        photoStrip({ itemId: it.id }) +
+
         (canEdit()
           ? '<h3 class="section-title">Adjust stock</h3>' +
             '<div class="stock-actions">' +
@@ -629,6 +682,7 @@
     );
 
     loadMovements(id);
+    hydratePhotos();
   }
 
   function loadMovements(itemId) {
@@ -699,12 +753,658 @@
     var it = itemById(id);
     if (!it) return;
     if (!confirm("Delete “" + it.name + "” and its whole stock history? This cannot be undone.")) return;
-    sb.from("inventory_items").delete().eq("id", id).then(function (res) {
+    var pics = photosForItem(id);
+    purgePhotoFiles(pics).then(function () {
+      return sb.from("inventory_items").delete().eq("id", id);
+    }).then(function (res) {
       if (res.error) return fail(res.error, "Could not delete item");
       db.inventory = db.inventory.filter(function (x) { return x.id !== id; });
+      db.photos = db.photos.filter(function (p) { return p.itemId !== id; });
       renderAll();
       closeModal();
       toast("Item deleted");
+    });
+  }
+
+  /* ============================================================
+     PHOTOS (orders + inventory items)
+     Files live in the private "photos" storage bucket; the photos
+     table holds the metadata. Visible to the whole signed-in team.
+     ============================================================ */
+
+  var signedCache = {}; // path -> { url, expires }
+
+  function randId() {
+    return Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+  }
+
+  function photosForOrder(orderId) {
+    return db.photos.filter(function (p) { return p.orderId === orderId; });
+  }
+
+  function photosForItem(itemId) {
+    return db.photos.filter(function (p) { return p.itemId === itemId; });
+  }
+
+  function kindLabel(k) {
+    for (var i = 0; i < PHOTO_KINDS.length; i++) if (PHOTO_KINDS[i][0] === k) return PHOTO_KINDS[i][1];
+    return "Photo";
+  }
+
+  function photoById(id) {
+    for (var i = 0; i < db.photos.length; i++) if (db.photos[i].id === id) return db.photos[i];
+    return null;
+  }
+
+  function canDeletePhoto(p) {
+    return isAdmin() || (me && p.createdBy === me.id);
+  }
+
+  // Shrink a phone photo (often 3-8 MB) to ~150-250 KB before upload.
+  // Keeps uploads quick on mobile data and the free storage tier usable.
+  function compressImage(file) {
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onerror = function () { reject(new Error("Could not read that file")); };
+      reader.onload = function () {
+        var img = new Image();
+        img.onerror = function () { reject(new Error("That file is not a readable image")); };
+        img.onload = function () {
+          var w = img.naturalWidth, h = img.naturalHeight;
+          var scale = Math.min(1, PHOTO_MAX_EDGE / Math.max(w, h));
+          var cw = Math.max(1, Math.round(w * scale)), ch = Math.max(1, Math.round(h * scale));
+          var canvas = document.createElement("canvas");
+          canvas.width = cw; canvas.height = ch;
+          canvas.getContext("2d").drawImage(img, 0, 0, cw, ch);
+          canvas.toBlob(function (blob) {
+            if (blob) resolve(blob);
+            else reject(new Error("Could not process that image"));
+          }, "image/jpeg", PHOTO_QUALITY);
+        };
+        img.src = reader.result;
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  // Batch-sign paths for a private bucket, memoised until they near expiry.
+  function signedUrls(paths) {
+    var now = Date.now();
+    var missing = paths.filter(function (p) {
+      var c = signedCache[p];
+      return !c || c.expires < now + 60000;
+    });
+    if (!missing.length) return Promise.resolve(signedCache);
+    return sb.storage.from("photos").createSignedUrls(missing, 3600).then(function (res) {
+      if (res.error) return signedCache;
+      (res.data || []).forEach(function (row) {
+        var p = row.path || row.signedUrl;
+        if (row.signedUrl && row.path) {
+          signedCache[row.path] = { url: row.signedUrl, expires: now + 3600000 };
+        }
+      });
+      return signedCache;
+    }).catch(function () { return signedCache; });
+  }
+
+  // Thumbs render empty, then get their src filled in by hydratePhotos(),
+  // the same way showItemDetail fills its history list.
+  function photoStrip(subject) {
+    var list = subject.orderId ? photosForOrder(subject.orderId) : photosForItem(subject.itemId);
+    var addBtn = canEdit()
+      ? '<button class="photo-add no-print" data-add-photo="' +
+          (subject.orderId ? "order:" + subject.orderId : "item:" + subject.itemId) +
+        '"><span>＋</span>Add photo</button>'
+      : "";
+    if (!list.length && !addBtn) return "";
+    return (
+      '<h3 class="section-title">📷 Photos</h3>' +
+      '<div class="photo-strip">' +
+        list.map(function (p) {
+          return '<button class="photo-thumb" data-open-photo="' + p.id + '" title="' + esc(kindLabel(p.kind)) + '">' +
+            '<img alt="' + esc(p.caption || kindLabel(p.kind)) + '" data-photo-path="' + esc(p.path) + '">' +
+            (subject.orderId ? '<span class="photo-kind-tag">' + esc(kindLabel(p.kind)) + "</span>" : "") +
+          "</button>";
+        }).join("") +
+        addBtn +
+      "</div>"
+    );
+  }
+
+  function hydratePhotos(root) {
+    var imgs = $all("img[data-photo-path]", root || document);
+    if (!imgs.length) return;
+    var paths = imgs.map(function (i) { return i.getAttribute("data-photo-path"); });
+    signedUrls(paths).then(function (cache) {
+      imgs.forEach(function (i) {
+        var c = cache[i.getAttribute("data-photo-path")];
+        if (c) i.src = c.url;
+        else i.parentNode && i.parentNode.classList.add("photo-broken");
+      });
+    });
+  }
+
+  function showPhotoUpload(subjectKey) {
+    if (!canEdit()) return;
+    var isOrder = subjectKey.indexOf("order:") === 0;
+    var subjectId = subjectKey.slice(subjectKey.indexOf(":") + 1);
+    openModal(
+      modalHead("Add photo", isOrder ? "Style reference, fabric, fitting or the finished piece." : "A picture of this stock item.") +
+      '<div class="modal-body"><form id="photoForm" data-subject="' + esc(subjectKey) + '">' +
+        '<div class="field"><label for="ph_file">Choose a photo</label>' +
+          '<input id="ph_file" type="file" accept="image/*" required></div>' +
+        '<img id="ph_preview" class="photo-preview" hidden alt="Selected photo">' +
+        (isOrder
+          ? '<div class="field" style="margin-top:10px"><label for="ph_kind">What does it show?</label><select id="ph_kind">' +
+            PHOTO_KINDS.map(function (k) {
+              return '<option value="' + k[0] + '"' + (k[0] === "style" ? " selected" : "") + ">" + k[1] + "</option>";
+            }).join("") + "</select></div>"
+          : "") +
+        '<div class="field" style="margin-top:10px"><label for="ph_caption">Caption (optional)</label>' +
+          '<input id="ph_caption" placeholder="e.g. Neckline detail"></div>' +
+        '<div class="hint" style="margin-top:8px">Photos are shrunk automatically before upload, so they stay quick on mobile data.</div>' +
+        '<div class="modal-actions"><span class="spacer"></span>' +
+          '<button type="button" class="btn btn-ghost" data-action="close-modal">Cancel</button>' +
+          '<button type="submit" class="btn btn-primary">Upload</button>' +
+        "</div>" +
+      "</form></div>"
+    );
+  }
+
+  function submitPhoto(form) {
+    var subjectKey = form.getAttribute("data-subject");
+    var isOrder = subjectKey.indexOf("order:") === 0;
+    var subjectId = subjectKey.slice(subjectKey.indexOf(":") + 1);
+    var file = $("#ph_file").files[0];
+    if (!file) { toast("Choose a photo first", true); return; }
+
+    var kind = $("#ph_kind") ? $("#ph_kind").value : "other";
+    var caption = $("#ph_caption").value.trim();
+    busy("#photoForm", true);
+    toast("Uploading photo…");
+
+    compressImage(file).then(function (blob) {
+      var path = (isOrder ? "orders/" : "inventory/") + subjectId + "/" + randId() + ".jpg";
+      return sb.storage.from("photos").upload(path, blob, { contentType: "image/jpeg" })
+        .then(function (up) {
+          if (up.error) throw up.error;
+          var row = { path: path, kind: kind, caption: caption, created_by: myUserId };
+          if (isOrder) row.order_id = subjectId; else row.item_id = subjectId;
+          return sb.from("photos").insert(row).select("*").single();
+        });
+    }).then(function (res) {
+      if (res.error) throw res.error;
+      db.photos.push(rowToPhoto(res.data));
+      toast("Photo added ✓");
+      if (isOrder) showOrderDetail(subjectId);
+      else showItemDetail(subjectId);
+    }).catch(function (e) {
+      busy("#photoForm", false);
+      fail(e, "Could not upload photo");
+    });
+  }
+
+  function showPhotoLightbox(id) {
+    var p = photoById(id);
+    if (!p) return;
+    var backTo = p.orderId ? "order:" + p.orderId : "item:" + p.itemId;
+    openModal(
+      modalHead(esc(p.caption || kindLabel(p.kind)), p.orderId ? esc(kindLabel(p.kind)) + " · " + esc(fmtDate(p.createdAt)) : esc(fmtDate(p.createdAt))) +
+      '<div class="modal-body">' +
+        '<img class="photo-full" alt="' + esc(p.caption || kindLabel(p.kind)) + '" data-photo-path="' + esc(p.path) + '">' +
+        '<div class="modal-actions">' +
+          (canDeletePhoto(p) ? '<button class="btn btn-danger btn-sm" data-delete-photo="' + p.id + '">Delete</button>' : "") +
+          '<span class="spacer"></span>' +
+          '<button class="btn btn-ghost" data-back-to="' + backTo + '">Back</button>' +
+        "</div>" +
+      "</div>"
+    );
+    hydratePhotos();
+  }
+
+  function deletePhoto(id) {
+    var p = photoById(id);
+    if (!p || !canDeletePhoto(p)) return;
+    if (!confirm("Delete this photo? This cannot be undone.")) return;
+    var backTo = p.orderId ? "order:" + p.orderId : "item:" + p.itemId;
+    sb.from("photos").delete().eq("id", id).then(function (res) {
+      if (res.error) return fail(res.error, "Could not delete photo");
+      return sb.storage.from("photos").remove([p.path]).then(function () {
+        db.photos = db.photos.filter(function (x) { return x.id !== id; });
+        delete signedCache[p.path];
+        toast("Photo deleted");
+        if (p.orderId) showOrderDetail(p.orderId); else showItemDetail(p.itemId);
+      });
+    });
+  }
+
+  // Remove the stored files for a subject before its record is deleted;
+  // the photos rows cascade, but storage objects would be orphaned.
+  function purgePhotoFiles(list) {
+    if (!list.length) return Promise.resolve();
+    var paths = list.map(function (p) { return p.path; });
+    paths.forEach(function (p) { delete signedCache[p]; });
+    return sb.storage.from("photos").remove(paths).catch(function () { /* best effort */ });
+  }
+
+  /* ============================================================
+     INVOICES (admin only)
+     Amounts and client details are snapshot when the invoice is
+     created, so an issued document never changes underneath you.
+     ============================================================ */
+
+  var INV_STATUS = {
+    unpaid: ["Unpaid", "st-cancelled"],
+    partly_paid: ["Part paid", "st-adjustments"],
+    paid: ["Paid", "st-ready"],
+    cancelled: ["Cancelled", "st-delivered"]
+  };
+
+  function invoiceById(id) {
+    for (var i = 0; i < db.invoices.length; i++) if (db.invoices[i].id === id) return db.invoices[i];
+    return null;
+  }
+
+  function invStatusPill(inv) {
+    var s = INV_STATUS[inv.status] || INV_STATUS.unpaid;
+    return '<span class="pill ' + s[1] + '">' + s[0] + "</span>";
+  }
+
+  function statusForAmounts(total, paid) {
+    if (paid <= 0) return "unpaid";
+    if (paid + 0.001 >= total) return "paid";
+    return "partly_paid";
+  }
+
+  function renderInvoices() {
+    var view = $("#view-invoices");
+    if (!view) return;
+    if (!isAdmin()) { view.innerHTML = ""; return; }
+
+    var list = db.invoices.slice();
+    if (ui.invoiceSearch) {
+      var q = ui.invoiceSearch.toLowerCase();
+      list = list.filter(function (v) {
+        return (v.number + " " + v.clientName + " " + v.status).toLowerCase().indexOf(q) !== -1;
+      });
+    }
+
+    var owed = db.invoices.reduce(function (t, v) {
+      return t + (v.status === "cancelled" ? 0 : Math.max(0, v.balance));
+    }, 0);
+
+    var html =
+      '<div class="view-head"><h2>Invoices</h2>' +
+        '<button class="btn btn-primary" data-action="new-invoice">+ New Invoice</button></div>' +
+      '<div class="stats-grid" style="margin-bottom:12px">' +
+        statCard("Invoices", db.invoices.length, "") +
+        statCard("Outstanding", money(owed), "stat-money") +
+      "</div>" +
+      '<div class="toolbar">' +
+        '<input class="search-input" id="invoiceSearch" type="search" placeholder="Search by number or client…" value="' + esc(ui.invoiceSearch) + '">' +
+      "</div>";
+
+    if (list.length) {
+      html += '<div class="card-list">' + list.map(function (v) {
+        return (
+          '<div class="item-card" data-open-invoice="' + v.id + '">' +
+            '<div class="card-top">' +
+              '<div><div class="card-title"><span class="ref">' + esc(v.number) + "</span>" + esc(v.clientName || "(client removed)") + "</div>" +
+              '<div class="card-sub">' + esc(fmtDateShort(v.issueDate)) + " · " + v.items.length + " item" + (v.items.length === 1 ? "" : "s") + "</div></div>" +
+              '<div class="card-badges">' + invStatusPill(v) + "</div>" +
+            "</div>" +
+            '<div class="card-foot">' +
+              '<span class="balance-chip" style="color:var(--accent-dark)">' + money(v.total) + " total</span>" +
+              (v.balance > 0 && v.status !== "cancelled"
+                ? '<span class="balance-chip balance-owed">' + money(v.balance) + " due</span>"
+                : '<span class="balance-chip balance-paid">Settled ✓</span>') +
+            "</div>" +
+          "</div>"
+        );
+      }).join("") + "</div>";
+    } else if (!db.invoices.length) {
+      html += '<div class="empty"><span class="empty-icon">🧾</span><h3>No invoices yet</h3>' +
+        "<p>Create an invoice from an order or a client, then print it or send it on WhatsApp.</p>" +
+        '<button class="btn btn-primary" data-action="new-invoice">+ New Invoice</button></div>';
+    } else {
+      html += '<div class="empty"><span class="empty-icon">🔍</span><h3>No invoices match</h3><p>Try a different search.</p></div>';
+    }
+
+    view.innerHTML = html;
+  }
+
+  // ---- builder ----------------------------------------------------------
+
+  function lineRow(i, it) {
+    return (
+      '<tr class="inv-line" data-line="' + i + '">' +
+        '<td><input class="inv-desc" value="' + esc(it.description) + '" placeholder="Description"></td>' +
+        '<td><input class="inv-qty" type="number" min="0" step="any" inputmode="decimal" value="' + esc(it.qty) + '"></td>' +
+        '<td><input class="inv-price" type="number" min="0" step="any" inputmode="decimal" value="' + esc(it.unit_price) + '"></td>' +
+        '<td class="inv-line-amt">' + money(Number(it.qty || 0) * Number(it.unit_price || 0)) + "</td>" +
+        '<td><button type="button" class="btn btn-ghost btn-sm" data-del-line="' + i + '" title="Remove line">✕</button></td>' +
+      "</tr>"
+    );
+  }
+
+  function showInvoiceBuilder(opts) {
+    if (!isAdmin()) return;
+    opts = opts || {};
+    var client = opts.clientId ? clientById(opts.clientId) : null;
+    var order = opts.orderId ? orderById(opts.orderId) : null;
+    if (order && !client) client = clientById(order.clientId);
+
+    // Choosing a client first when we have neither
+    if (!client) {
+      var opts2 = db.clients.slice().sort(function (a, b) { return a.name.localeCompare(b.name); })
+        .map(function (c) { return '<option value="' + c.id + '">' + esc(c.name) + "</option>"; }).join("");
+      openModal(
+        modalHead("New Invoice", "Who is this invoice for?") +
+        '<div class="modal-body">' +
+          (db.clients.length
+            ? '<div class="field"><label for="inv_client">Client</label><select id="inv_client"><option value="">Choose client</option>' + opts2 + "</select></div>" +
+              '<div class="modal-actions"><span class="spacer"></span>' +
+              '<button class="btn btn-ghost" data-action="close-modal">Cancel</button>' +
+              '<button class="btn btn-primary" data-pick-invoice-client>Continue</button></div>'
+            : '<div class="notice">Add a client first, then you can invoice her.</div>' +
+              '<div class="modal-actions"><span class="spacer"></span><button class="btn btn-ghost" data-action="close-modal">Close</button></div>') +
+        "</div>"
+      );
+      return;
+    }
+
+    // Which orders to bill
+    var clientOrders = ordersForClient(client.id).filter(function (o) { return o.status !== "cancelled"; });
+    var chosen = order ? [order] : clientOrders.filter(function (o) { return balanceOf(o) > 0; });
+    if (!chosen.length) chosen = clientOrders.slice(0, 1);
+
+    var lines = chosen.map(function (o) {
+      return { description: (o.garment || "Garment") + (o.fabric ? " — " + o.fabric : "") + " (" + o.ref + ")", qty: 1, unit_price: Number(o.price || 0) };
+    });
+    if (!lines.length) lines = [{ description: "", qty: 1, unit_price: 0 }];
+    var paid = chosen.reduce(function (t, o) { return t + paidTotal(o); }, 0);
+
+    var pickList = order ? "" :
+      '<div class="field full"><label>Orders to include</label>' +
+      (clientOrders.length
+        ? clientOrders.map(function (o) {
+            var on = chosen.indexOf(o) !== -1;
+            return '<label class="inv-pick"><input type="checkbox" data-inv-order="' + o.id + '"' + (on ? " checked" : "") + ">" +
+              "<span>" + esc(o.ref) + " · " + esc(o.garment || "Order") + " — " + money(o.price) +
+              (balanceOf(o) > 0 ? ' <span style="color:var(--red)">' + money(balanceOf(o)) + " due</span>" : ' <span style="color:var(--green)">paid</span>') +
+              "</span></label>";
+          }).join("")
+        : '<p style="color:var(--muted);font-size:14px">This client has no orders yet — add lines by hand below.</p>') +
+      "</div>";
+
+    var d = new Date(); d.setDate(d.getDate() + 7);
+    var dueDefault = d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
+    var notes = (db.invoiceSettings && db.invoiceSettings.defaultNotes) || "";
+
+    openModal(
+      modalHead("New Invoice", "for <strong>" + esc(client.name) + "</strong>") +
+      '<div class="modal-body"><form id="invoiceForm" data-client-id="' + client.id + '" data-orders="' + esc(chosen.map(function (o) { return o.id; }).join(",")) + '">' +
+        (pickList ? '<div class="form-grid">' + pickList + "</div>" : "") +
+        '<h3 class="section-title">Items</h3>' +
+        '<div class="inv-lines-wrap"><table class="inv-lines"><thead><tr>' +
+          "<th>Description</th><th>Qty</th><th>Price</th><th>Amount</th><th></th>" +
+        '</tr></thead><tbody id="invLines">' + lines.map(function (l, i) { return lineRow(i, l); }).join("") + "</tbody></table></div>" +
+        '<button type="button" class="btn btn-subtle btn-sm" data-add-line style="margin-top:8px">+ Add line</button>' +
+        '<div class="form-grid" style="margin-top:14px">' +
+          '<div class="field"><label for="inv_discount">Discount</label><input id="inv_discount" type="number" min="0" step="any" inputmode="decimal" value="0"></div>' +
+          '<div class="field"><label for="inv_paid">Already paid</label><input id="inv_paid" type="number" min="0" step="any" inputmode="decimal" value="' + esc(paid) + '"></div>' +
+          '<div class="field"><label for="inv_issue">Invoice date</label><input id="inv_issue" type="date" value="' + esc(todayISO()) + '"></div>' +
+          '<div class="field"><label for="inv_due">Payment due</label><input id="inv_due" type="date" value="' + esc(dueDefault) + '"></div>' +
+          '<div class="field full"><label for="inv_notes">Notes / terms</label><textarea id="inv_notes" placeholder="e.g. 50% deposit required. Balance due on collection.">' + esc(notes) + "</textarea></div>" +
+        "</div>" +
+        '<div class="inv-totals-live" id="invTotals"></div>' +
+        '<div class="modal-actions"><span class="spacer"></span>' +
+          '<button type="button" class="btn btn-ghost" data-action="close-modal">Cancel</button>' +
+          '<button type="submit" class="btn btn-primary">Create Invoice</button>' +
+        "</div>" +
+      "</form></div>"
+    );
+    recalcInvoice();
+  }
+
+  function readLines() {
+    return $all("#invLines .inv-line").map(function (tr) {
+      return {
+        description: $(".inv-desc", tr).value.trim(),
+        qty: Number($(".inv-qty", tr).value || 0),
+        unit_price: Number($(".inv-price", tr).value || 0)
+      };
+    });
+  }
+
+  function recalcInvoice() {
+    if (!$("#invLines")) return;
+    var lines = readLines();
+    var subtotal = 0;
+    $all("#invLines .inv-line").forEach(function (tr, i) {
+      var amt = Number(lines[i].qty || 0) * Number(lines[i].unit_price || 0);
+      subtotal += amt;
+      $(".inv-line-amt", tr).textContent = money(amt);
+    });
+    var discount = Number($("#inv_discount").value || 0);
+    var paid = Number($("#inv_paid").value || 0);
+    var total = Math.max(0, subtotal - discount);
+    var balance = total - paid;
+    $("#invTotals").innerHTML =
+      '<div class="inv-total-row"><span>Subtotal</span><span>' + money(subtotal) + "</span></div>" +
+      (discount > 0 ? '<div class="inv-total-row"><span>Discount</span><span>−' + money(discount) + "</span></div>" : "") +
+      '<div class="inv-total-row inv-total-main"><span>Total</span><span>' + money(total) + "</span></div>" +
+      (paid > 0 ? '<div class="inv-total-row"><span>Paid</span><span style="color:var(--green)">' + money(paid) + "</span></div>" : "") +
+      '<div class="inv-total-row inv-total-main"><span>Balance due</span><span style="color:' + (balance > 0 ? "var(--red)" : "var(--green)") + '">' + money(balance) + "</span></div>";
+  }
+
+  function submitInvoice(form) {
+    if (!isAdmin()) return;
+    var client = clientById(form.getAttribute("data-client-id"));
+    var lines = readLines().filter(function (l) { return l.description || l.unit_price > 0; });
+    if (!lines.length) { toast("Add at least one item", true); return; }
+
+    lines = lines.map(function (l) {
+      return { description: l.description, qty: l.qty, unit_price: l.unit_price, amount: l.qty * l.unit_price };
+    });
+    var subtotal = lines.reduce(function (t, l) { return t + l.amount; }, 0);
+    var discount = Number($("#inv_discount").value || 0);
+    var paid = Number($("#inv_paid").value || 0);
+    var total = Math.max(0, subtotal - discount);
+    var orderIds = (form.getAttribute("data-orders") || "").split(",").filter(Boolean);
+
+    var row = {
+      client_id: client ? client.id : null,
+      order_ids: orderIds,
+      client_name: client ? client.name : "",
+      client_phone: client ? (client.phone || "") : "",
+      client_address: client ? (client.address || "") : "",
+      issue_date: $("#inv_issue").value || todayISO(),
+      due_date: $("#inv_due").value || null,
+      items: lines,
+      subtotal: subtotal, discount: discount, total: total,
+      amount_paid: paid, balance: total - paid,
+      notes: $("#inv_notes").value.trim(),
+      status: statusForAmounts(total, paid)
+    };
+
+    busy("#invoiceForm", true);
+    sb.from("invoices").insert(row).select("*").single().then(function (res) {
+      if (res.error) { busy("#invoiceForm", false); return fail(res.error, "Could not create invoice"); }
+      var saved = rowToInvoice(res.data);
+      db.invoices.unshift(saved);
+      renderAll();
+      toast("Invoice " + saved.number + " created ✓");
+      showInvoiceDoc(saved.id);
+    });
+  }
+
+  // ---- the document -----------------------------------------------------
+
+  function showInvoiceDoc(id) {
+    var v = invoiceById(id);
+    if (!v || !isAdmin()) return;
+    var s = db.invoiceSettings || {};
+    var wa = phoneDigits(v.clientPhone);
+
+    var payBlock = (s.bankName || s.bankAccountNumber)
+      ? '<div class="inv-pay-details"><div class="inv-pay-title">Payment details</div>' +
+          (s.bankName ? "<div>" + esc(s.bankName) + "</div>" : "") +
+          (s.bankAccountName ? "<div>" + esc(s.bankAccountName) + "</div>" : "") +
+          (s.bankAccountNumber ? '<div class="inv-acct">' + esc(s.bankAccountNumber) + "</div>" : "") +
+        "</div>"
+      : "";
+
+    openModal(
+      '<div class="modal-head no-print"><div><h2>' + esc(v.number) + "</h2>" +
+        '<div class="modal-sub">' + esc(v.clientName) + " · " + invStatusPill(v) + "</div></div>" +
+        '<button class="modal-close" data-action="close-modal" aria-label="Close">✕</button></div>' +
+      '<div class="modal-body">' +
+        '<div class="invoice-doc">' +
+          '<div class="inv-head">' +
+            '<div class="inv-brand"><img src="img/logo.svg" alt="" class="inv-logo">' +
+              "<div><div class=\"inv-biz\">" + esc(db.settings.businessName) + "</div>" +
+              (s.businessAddress ? '<div class="inv-biz-line">' + esc(s.businessAddress) + "</div>" : "") +
+              (s.businessPhone ? '<div class="inv-biz-line">' + esc(s.businessPhone) + "</div>" : "") +
+              (s.businessEmail ? '<div class="inv-biz-line">' + esc(s.businessEmail) + "</div>" : "") +
+              "</div></div>" +
+            '<div class="inv-meta"><div class="inv-word">INVOICE</div>' +
+              "<div><strong>" + esc(v.number) + "</strong></div>" +
+              "<div>Date: " + esc(fmtDateShort(v.issueDate)) + "</div>" +
+              (v.dueDate ? "<div>Due: " + esc(fmtDateShort(v.dueDate)) + "</div>" : "") +
+            "</div>" +
+          "</div>" +
+
+          '<div class="inv-party"><div class="inv-party-label">Billed to</div>' +
+            '<div class="inv-party-name">' + esc(v.clientName || "-") + "</div>" +
+            (v.clientPhone ? "<div>" + esc(v.clientPhone) + "</div>" : "") +
+            (v.clientAddress ? "<div>" + esc(v.clientAddress) + "</div>" : "") +
+          "</div>" +
+
+          '<table class="inv-items"><thead><tr>' +
+            "<th>Description</th><th class=\"num\">Qty</th><th class=\"num\">Price</th><th class=\"num\">Amount</th>" +
+          "</tr></thead><tbody>" +
+            v.items.map(function (l) {
+              return "<tr><td>" + esc(l.description) + '</td><td class="num">' + esc(l.qty) +
+                '</td><td class="num">' + money(l.unit_price) + '</td><td class="num">' + money(l.amount) + "</td></tr>";
+            }).join("") +
+          "</tbody></table>" +
+
+          '<div class="inv-totals">' +
+            '<div class="inv-total-row"><span>Subtotal</span><span>' + money(v.subtotal) + "</span></div>" +
+            (v.discount > 0 ? '<div class="inv-total-row"><span>Discount</span><span>−' + money(v.discount) + "</span></div>" : "") +
+            '<div class="inv-total-row inv-total-main"><span>Total</span><span>' + money(v.total) + "</span></div>" +
+            (v.amountPaid > 0 ? '<div class="inv-total-row"><span>Paid</span><span>' + money(v.amountPaid) + "</span></div>" : "") +
+            '<div class="inv-total-row inv-total-main"><span>Balance due</span><span>' + money(v.balance) + "</span></div>" +
+          "</div>" +
+
+          (v.notes ? '<div class="inv-notes">' + esc(v.notes) + "</div>" : "") +
+          payBlock +
+          '<div class="inv-thanks">Thank you for your patronage.</div>' +
+        "</div>" +
+
+        '<div class="modal-actions no-print">' +
+          '<button class="btn btn-ghost btn-sm" data-print-order>🖨 Print / Save PDF</button>' +
+          (wa ? '<a class="btn btn-ghost btn-sm" href="' + invoiceWaLink(v) + '" target="_blank" rel="noopener">💬 Send on WhatsApp</a>' : "") +
+          '<button class="btn btn-ghost btn-sm" data-delete-invoice="' + v.id + '">Delete</button>' +
+          '<span class="spacer"></span>' +
+          (v.status !== "paid"
+            ? '<button class="btn btn-primary" data-invoice-paid="' + v.id + '">✓ Mark paid</button>'
+            : '<button class="btn btn-ghost" data-invoice-unpaid="' + v.id + '">Mark unpaid</button>') +
+        "</div>" +
+      "</div>"
+    );
+  }
+
+  function invoiceWaLink(v) {
+    var s = db.invoiceSettings || {};
+    var lines = [
+      "Hello " + (v.clientName || "").split(" ")[0] + ", here is your invoice from " + db.settings.businessName + ".",
+      "",
+      "Invoice: " + v.number,
+      "Total: " + money(v.total)
+    ];
+    if (v.amountPaid > 0) lines.push("Paid: " + money(v.amountPaid));
+    lines.push("Balance due: " + money(v.balance));
+    if (v.dueDate) lines.push("Due by: " + fmtDateShort(v.dueDate));
+    if (s.bankName || s.bankAccountNumber) {
+      lines.push("", "Payment details:");
+      if (s.bankName) lines.push(s.bankName);
+      if (s.bankAccountName) lines.push(s.bankAccountName);
+      if (s.bankAccountNumber) lines.push(s.bankAccountNumber);
+    }
+    lines.push("", "Thank you!");
+    return "https://wa.me/" + phoneDigits(v.clientPhone) + "?text=" + encodeURIComponent(lines.join("\n"));
+  }
+
+  function setInvoicePaid(id, paidInFull) {
+    var v = invoiceById(id);
+    if (!v || !isAdmin()) return;
+    var paid = paidInFull ? v.total : 0;
+    sb.from("invoices").update({
+      amount_paid: paid, balance: v.total - paid,
+      status: statusForAmounts(v.total, paid)
+    }).eq("id", id).select("*").single().then(function (res) {
+      if (res.error) return fail(res.error, "Could not update invoice");
+      var saved = rowToInvoice(res.data);
+      db.invoices = db.invoices.map(function (x) { return x.id === saved.id ? saved : x; });
+      renderAll();
+      toast(paidInFull ? "Marked paid ✓" : "Marked unpaid");
+      showInvoiceDoc(id);
+    });
+  }
+
+  function deleteInvoice(id) {
+    var v = invoiceById(id);
+    if (!v || !isAdmin()) return;
+    if (!confirm("Delete invoice " + v.number + "? This cannot be undone.")) return;
+    sb.from("invoices").delete().eq("id", id).then(function (res) {
+      if (res.error) return fail(res.error, "Could not delete invoice");
+      db.invoices = db.invoices.filter(function (x) { return x.id !== id; });
+      renderAll();
+      closeModal();
+      toast("Invoice deleted");
+    });
+  }
+
+  function showInvoiceSettings() {
+    if (!isAdmin()) return;
+    var s = db.invoiceSettings || {};
+    openModal(
+      modalHead("Invoice details", "Printed on every invoice you give a client.") +
+      '<div class="modal-body"><form id="invSettingsForm">' +
+        '<div class="form-grid">' +
+          '<div class="field full"><label for="is_address">Business address</label><input id="is_address" value="' + esc(s.businessAddress || "") + '"></div>' +
+          '<div class="field"><label for="is_phone">Business phone</label><input id="is_phone" value="' + esc(s.businessPhone || "") + '"></div>' +
+          '<div class="field"><label for="is_email">Business email</label><input id="is_email" value="' + esc(s.businessEmail || "") + '"></div>' +
+          '<div class="field"><label for="is_bank">Bank name</label><input id="is_bank" value="' + esc(s.bankName || "") + '" placeholder="e.g. GTBank"></div>' +
+          '<div class="field"><label for="is_acctname">Account name</label><input id="is_acctname" value="' + esc(s.bankAccountName || "") + '"></div>' +
+          '<div class="field full"><label for="is_acctno">Account number</label><input id="is_acctno" value="' + esc(s.bankAccountNumber || "") + '" inputmode="numeric"></div>' +
+          '<div class="field full"><label for="is_notes">Default notes / terms</label><textarea id="is_notes" placeholder="e.g. 50% deposit required. Balance due on collection.">' + esc(s.defaultNotes || "") + "</textarea></div>" +
+        "</div>" +
+        '<div class="modal-actions"><span class="spacer"></span>' +
+          '<button type="button" class="btn btn-ghost" data-action="open-settings">Back</button>' +
+          '<button type="submit" class="btn btn-primary">Save</button></div>' +
+      "</form></div>"
+    );
+  }
+
+  function saveInvoiceSettings() {
+    var row = {
+      business_address: $("#is_address").value.trim(),
+      business_phone: $("#is_phone").value.trim(),
+      business_email: $("#is_email").value.trim(),
+      bank_name: $("#is_bank").value.trim(),
+      bank_account_name: $("#is_acctname").value.trim(),
+      bank_account_number: $("#is_acctno").value.trim(),
+      default_notes: $("#is_notes").value.trim(),
+      updated_at: new Date().toISOString()
+    };
+    sb.from("invoice_settings").update(row).eq("id", 1).select("*").single().then(function (res) {
+      if (res.error) return fail(res.error, "Could not save invoice details");
+      db.invoiceSettings = rowToInvSettings(res.data);
+      toast("Invoice details saved ✓");
+      closeModal();
     });
   }
 
@@ -1314,6 +2014,7 @@
         }).join("") : '<p style="color:var(--muted)">No orders yet for this client.</p>') +
         '<div class="modal-actions">' +
           (isAdmin() ? '<button class="btn btn-danger btn-sm" data-delete-client="' + c.id + '">Delete</button>' : "") +
+          (isAdmin() ? '<button class="btn btn-ghost btn-sm" data-invoice-client="' + c.id + '">🧾 Invoice</button>' : "") +
           (canEdit() ? '<button class="btn btn-ghost" data-edit-client="' + c.id + '">✎ Edit Client</button>' : "") +
           '<span class="spacer"></span>' +
           (canEdit() ? '<button class="btn btn-primary" data-new-order-for="' + c.id + '">+ New Order for ' + esc(c.name.split(" ")[0]) + "</button>" : "") +
@@ -1496,6 +2197,8 @@
             "</div>"
           : "") +
 
+        photoStrip({ orderId: o.id }) +
+
         clientMeasureBlock(c) +
 
         (isAdmin()
@@ -1511,6 +2214,7 @@
 
         '<div class="modal-actions">' +
           '<button class="btn btn-ghost btn-sm" data-print-order>🖨 Print job card</button>' +
+          (isAdmin() ? '<button class="btn btn-ghost btn-sm" data-invoice-order="' + o.id + '">🧾 Invoice</button>' : "") +
           (isOpen(o) && canEdit() ? '<button class="btn btn-ghost btn-sm" data-set-status="cancelled" data-order="' + o.id + '">Cancel order</button>' : "") +
           '<span class="spacer"></span>' +
           (canEdit() ? '<button class="btn btn-ghost" data-edit-order="' + o.id + '">✎ Edit</button>' : "") +
@@ -1518,6 +2222,7 @@
         "</div>" +
       "</div>"
     );
+    hydratePhotos();
   }
 
   function detail(dt, dd, big) {
@@ -1569,9 +2274,13 @@
     var o = orderById(id);
     if (!o) return;
     if (!confirm("Delete order " + o.ref + " permanently? This cannot be undone.")) return;
-    sb.from("orders").delete().eq("id", id).then(function (res) {
+    var pics = photosForOrder(id);
+    purgePhotoFiles(pics).then(function () {
+      return sb.from("orders").delete().eq("id", id);
+    }).then(function (res) {
       if (res.error) return fail(res.error, "Could not delete");
       db.orders = db.orders.filter(function (x) { return x.id !== id; });
+      db.photos = db.photos.filter(function (p) { return p.orderId !== id; });
       renderAll();
       closeModal();
       toast("Order deleted");
@@ -1613,7 +2322,8 @@
               '<div class="field"><label for="s_currency">Currency symbol</label><input id="s_currency" value="' + esc(db.settings.currency) + '" maxlength="4"><div class="hint">e.g. ₦, $, £, GH₵</div></div>' +
             "</div>" +
             '<div class="modal-actions" style="border:none;margin-top:10px;padding-top:0"><span class="spacer"></span>' +
-            '<button type="submit" class="btn btn-primary btn-sm">Save Settings</button></div></form>'
+            '<button type="submit" class="btn btn-primary btn-sm">Save Settings</button></div></form>' +
+            '<button class="btn btn-subtle btn-sm" data-action="invoice-settings">🧾 Invoice details &amp; bank account</button>'
           : "") +
 
         '<h3 class="section-title">👥 Team</h3>' +
@@ -1697,8 +2407,44 @@
   document.addEventListener("click", function (e) {
     var t = e.target;
 
-    var el = t.closest("[data-tab],[data-action],[data-order-filter],[data-open-order],[data-open-client],[data-advance-order],[data-edit-client],[data-delete-client],[data-new-order-for],[data-edit-order],[data-delete-order],[data-set-status],[data-del-payment],[data-print-order],[data-modal-overlay],[data-an-shift],[data-delete-user],[data-inv-cat],[data-open-item],[data-edit-item],[data-delete-item],[data-stock-in],[data-stock-out]");
+    var el = t.closest("[data-tab],[data-action],[data-order-filter],[data-open-order],[data-open-client],[data-advance-order],[data-edit-client],[data-delete-client],[data-new-order-for],[data-edit-order],[data-delete-order],[data-set-status],[data-del-payment],[data-print-order],[data-modal-overlay],[data-an-shift],[data-delete-user],[data-inv-cat],[data-open-item],[data-edit-item],[data-delete-item],[data-stock-in],[data-stock-out],[data-add-photo],[data-open-photo],[data-delete-photo],[data-back-to],[data-open-invoice],[data-invoice-order],[data-invoice-client],[data-pick-invoice-client],[data-add-line],[data-del-line],[data-delete-invoice],[data-invoice-paid],[data-invoice-unpaid]");
     if (!el) return;
+
+    if (el.hasAttribute("data-open-invoice")) { showInvoiceDoc(el.getAttribute("data-open-invoice")); return; }
+    if (el.hasAttribute("data-invoice-order")) { showInvoiceBuilder({ orderId: el.getAttribute("data-invoice-order") }); return; }
+    if (el.hasAttribute("data-invoice-client")) { showInvoiceBuilder({ clientId: el.getAttribute("data-invoice-client") }); return; }
+    if (el.hasAttribute("data-pick-invoice-client")) {
+      var pc = $("#inv_client").value;
+      if (pc) showInvoiceBuilder({ clientId: pc }); else toast("Choose a client first", true);
+      return;
+    }
+    if (el.hasAttribute("data-add-line")) {
+      var tb = $("#invLines");
+      var n = $all("#invLines .inv-line").length;
+      tb.insertAdjacentHTML("beforeend", lineRow(n, { description: "", qty: 1, unit_price: 0 }));
+      recalcInvoice();
+      return;
+    }
+    if (el.hasAttribute("data-del-line")) {
+      var rows = $all("#invLines .inv-line");
+      if (rows.length > 1) el.closest(".inv-line").remove();
+      else toast("An invoice needs at least one line", true);
+      recalcInvoice();
+      return;
+    }
+    if (el.hasAttribute("data-delete-invoice")) { deleteInvoice(el.getAttribute("data-delete-invoice")); return; }
+    if (el.hasAttribute("data-invoice-paid")) { setInvoicePaid(el.getAttribute("data-invoice-paid"), true); return; }
+    if (el.hasAttribute("data-invoice-unpaid")) { setInvoicePaid(el.getAttribute("data-invoice-unpaid"), false); return; }
+
+    if (el.hasAttribute("data-add-photo")) { showPhotoUpload(el.getAttribute("data-add-photo")); return; }
+    if (el.hasAttribute("data-open-photo")) { showPhotoLightbox(el.getAttribute("data-open-photo")); return; }
+    if (el.hasAttribute("data-delete-photo")) { deletePhoto(el.getAttribute("data-delete-photo")); return; }
+    if (el.hasAttribute("data-back-to")) {
+      var bk = el.getAttribute("data-back-to");
+      var bid = bk.slice(bk.indexOf(":") + 1);
+      if (bk.indexOf("order:") === 0) showOrderDetail(bid); else showItemDetail(bid);
+      return;
+    }
 
     if (el.hasAttribute("data-delete-user")) {
       deleteUser(el.getAttribute("data-delete-user"));
@@ -1776,6 +2522,8 @@
       case "new-client": showClientForm(null); break;
       case "new-client-then-order": showClientForm(null, { thenOrder: true }); break;
       case "new-item": showItemForm(null); break;
+      case "new-invoice": showInvoiceBuilder({}); break;
+      case "invoice-settings": showInvoiceSettings(); break;
       case "open-settings": showSettings(); break;
       case "export-data": exportData(); break;
       case "sign-out": signOut(); break;
@@ -1798,6 +2546,42 @@
   document.addEventListener("change", function (e) {
     var el = e.target.closest("[data-role-for]");
     if (el && isAdmin()) changeRole(el.getAttribute("data-role-for"), el.value);
+
+    // ticking an order in the invoice builder rebuilds the line items
+    if (e.target.hasAttribute && e.target.hasAttribute("data-inv-order")) {
+      var form = $("#invoiceForm");
+      if (form) {
+        var ids = $all("[data-inv-order]").filter(function (cb) { return cb.checked; })
+          .map(function (cb) { return cb.getAttribute("data-inv-order"); });
+        form.setAttribute("data-orders", ids.join(","));
+        var lines = ids.map(function (oid) {
+          var o = orderById(oid);
+          return o
+            ? { description: (o.garment || "Garment") + (o.fabric ? " — " + o.fabric : "") + " (" + o.ref + ")", qty: 1, unit_price: Number(o.price || 0) }
+            : null;
+        }).filter(Boolean);
+        if (!lines.length) lines = [{ description: "", qty: 1, unit_price: 0 }];
+        $("#invLines").innerHTML = lines.map(function (l, i) { return lineRow(i, l); }).join("");
+        $("#inv_paid").value = ids.reduce(function (t, oid) {
+          var o = orderById(oid);
+          return t + (o ? paidTotal(o) : 0);
+        }, 0);
+        recalcInvoice();
+      }
+      return;
+    }
+
+    if (e.target.id === "ph_file") {
+      var f = e.target.files[0];
+      var prev = $("#ph_preview");
+      if (f && prev) {
+        var r = new FileReader();
+        r.onload = function () { prev.src = r.result; prev.hidden = false; };
+        r.readAsDataURL(f);
+      } else if (prev) {
+        prev.hidden = true;
+      }
+    }
   });
 
   document.addEventListener("submit", function (e) {
@@ -1806,6 +2590,9 @@
     else if (form.id === "orderForm") { e.preventDefault(); submitOrderForm(form); }
     else if (form.id === "itemForm") { e.preventDefault(); submitItemForm(form); }
     else if (form.id === "stockForm") { e.preventDefault(); submitStock(form); }
+    else if (form.id === "photoForm") { e.preventDefault(); submitPhoto(form); }
+    else if (form.id === "invoiceForm") { e.preventDefault(); submitInvoice(form); }
+    else if (form.id === "invSettingsForm") { e.preventDefault(); saveInvoiceSettings(); }
     else if (form.id === "signinForm") { e.preventDefault(); doSignIn(form); }
     else if (form.id === "signupForm") { e.preventDefault(); doSignUp(form); }
     else if (form.id === "settingsForm") { e.preventDefault(); saveSettings(); }
@@ -1828,6 +2615,8 @@
     if (e.target.id === "orderSearch") { ui.orderSearch = e.target.value; renderOrdersPreservingFocus(); }
     else if (e.target.id === "clientSearch") { ui.clientSearch = e.target.value; renderClientsPreservingFocus(); }
     else if (e.target.id === "invSearch") { ui.invSearch = e.target.value; renderInvPreservingFocus(); }
+    else if (e.target.id === "invoiceSearch") { ui.invoiceSearch = e.target.value; renderInvoicesPreservingFocus(); }
+    else if (e.target.closest && e.target.closest("#invoiceForm")) recalcInvoice();
   });
 
   function renderOrdersPreservingFocus() {
@@ -1850,6 +2639,14 @@
     var pos = $("#invSearch").selectionStart;
     renderInventory();
     var inp = $("#invSearch");
+    inp.focus();
+    inp.setSelectionRange(pos, pos);
+  }
+
+  function renderInvoicesPreservingFocus() {
+    var pos = $("#invoiceSearch").selectionStart;
+    renderInvoices();
+    var inp = $("#invoiceSearch");
     inp.focus();
     inp.setSelectionRange(pos, pos);
   }
