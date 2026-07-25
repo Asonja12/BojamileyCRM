@@ -103,6 +103,12 @@ Internet is required since data lives in the cloud.
   table, so staff never see them. Amounts print as `NGN 35,000` in the PDF because
   the PDF fonts have no ₦ glyph.
 - **Team:** the Admin manages who has what access from the Menu.
+- **Dark mode:** Menu → 🌒 Appearance, with Light, Dark and System. System follows
+  the phone's or computer's own setting and switches over live when it changes
+  (for example at sunset on a phone set to automatic). The choice is saved on that
+  device, not to the account, so each person on the team picks their own without
+  affecting anyone else. Invoices and job cards stay on white paper in both
+  themes, on screen and when printed.
 - **Analytics (Admin only):** a per-month view of orders received, money
   received, new clients, booked value, average order value and on-time
   delivery rate; 6-month trends for money and orders; who owes money and
@@ -142,6 +148,11 @@ account that owns the `bojamiley-crm` project). Two settings worth knowing:
 ## Customising
 
 - Business name and currency symbol: Menu inside the app (Admin only).
+- Theme colours: the two token blocks at the top of `css/crm.css` (`:root` for
+  light, `:root[data-theme="dark"]` for dark). Everything else in the stylesheet
+  refers to those tokens, so changing a colour in one place changes it
+  everywhere. The dark block sits inside `@media screen` on purpose: printing
+  falls back to the light tokens so paper is never dark.
 - Garment type suggestions: edit the `GARMENTS` list in `js/app.js`.
 - Measurement fields: edit the `MEASUREMENTS` list in `js/app.js`.
 - Pipeline stages: edit the `STATUSES` list in `js/app.js` (also update the

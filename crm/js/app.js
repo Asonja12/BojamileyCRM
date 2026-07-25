@@ -519,7 +519,7 @@
         (canEdit() ? '<button class="btn btn-primary" data-action="new-item">+ Add Item</button>' : "") + "</div>";
 
     if (low.length) {
-      html += '<div class="notice" style="background:var(--red-soft);border-color:#eecfca;color:var(--red)">' +
+      html += '<div class="notice" style="background:var(--red-soft);border-color:var(--red-line);color:var(--red)">' +
         "⚠ <strong>" + low.length + " item" + (low.length === 1 ? "" : "s") + " low on stock.</strong> " +
         esc(low.slice(0, 4).map(function (it) { return it.name; }).join(", ")) +
         (low.length > 4 ? " and " + (low.length - 4) + " more" : "") + ".</div>";
@@ -2506,6 +2506,72 @@
     });
   }
 
+  /* ---------- Appearance: light / dark / system ---------- */
+
+  // Kept per device in localStorage rather than in the settings table: that
+  // table is one shared row only an admin may write, so it could not hold a
+  // preference per person. index.html applies the same key before first paint.
+  var THEME_KEY = "bojamiley-theme";
+  var THEME_OPTIONS = [
+    ["light",  "☀", "Light"],
+    ["dark",   "☾", "Dark"],
+    ["system", "◐", "System"]
+  ];
+
+  function themePref() {
+    try {
+      var v = localStorage.getItem(THEME_KEY);
+      return (v === "light" || v === "dark") ? v : "system";
+    } catch (e) { return "system"; }   // localStorage blocked (private mode)
+  }
+
+  function themeIsDark() {
+    var pref = themePref();
+    if (pref !== "system") return pref === "dark";
+    return !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  }
+
+  function applyTheme() {
+    var dark = themeIsDark();
+    document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+    var meta = $('meta[name="theme-color"]');   // phone browser chrome
+    if (meta) meta.setAttribute("content", dark ? "#211a16" : "#faf6f1");
+  }
+
+  function setTheme(pref) {
+    try { localStorage.setItem(THEME_KEY, pref); } catch (e) { /* not persisted */ }
+    applyTheme();
+    // just move the pressed state; rebuilding the Menu would scroll it away
+    $all("[data-theme-set]").forEach(function (b) {
+      b.setAttribute("aria-pressed", b.getAttribute("data-theme-set") === pref ? "true" : "false");
+    });
+  }
+
+  function themeToggle() {
+    var pref = themePref();
+    return (
+      '<h3 class="section-title">🌒 Appearance</h3>' +
+      '<div class="theme-toggle" role="group" aria-label="Colour theme">' +
+        THEME_OPTIONS.map(function (o) {
+          return '<button type="button" class="theme-btn" data-theme-set="' + o[0] + '" ' +
+            'aria-pressed="' + (pref === o[0] ? "true" : "false") + '">' +
+            '<span class="theme-ico" aria-hidden="true">' + o[1] + "</span>" + o[2] + "</button>";
+        }).join("") +
+      "</div>" +
+      '<div class="hint" style="margin-top:6px">Saved on this device only, so everyone on the team picks their own. Invoices and job cards always print on white paper.</div>'
+    );
+  }
+
+  // While the preference is "system", follow the phone/desktop setting live.
+  if (window.matchMedia) {
+    var themeMq = window.matchMedia("(prefers-color-scheme: dark)");
+    var onSystemTheme = function () { if (themePref() === "system") applyTheme(); };
+    if (themeMq.addEventListener) themeMq.addEventListener("change", onSystemTheme);
+    else if (themeMq.addListener) themeMq.addListener(onSystemTheme);   // Safari < 14
+  }
+
+  applyTheme();
+
   /* ---------- Menu: settings, team, backup, sign out ---------- */
 
   function showSettings() {
@@ -2576,6 +2642,8 @@
           : "") +
 
         pendingBlock +
+
+        themeToggle() +
 
         '<h3 class="section-title">👥 Team</h3>' +
         (isAdmin()
@@ -2671,8 +2739,10 @@
   document.addEventListener("click", function (e) {
     var t = e.target;
 
-    var el = t.closest("[data-tab],[data-action],[data-order-filter],[data-open-order],[data-open-client],[data-advance-order],[data-edit-client],[data-delete-client],[data-new-order-for],[data-edit-order],[data-delete-order],[data-set-status],[data-del-payment],[data-print-order],[data-modal-overlay],[data-an-shift],[data-delete-user],[data-inv-cat],[data-open-item],[data-edit-item],[data-delete-item],[data-stock-in],[data-stock-out],[data-add-photo],[data-open-photo],[data-delete-photo],[data-back-to],[data-open-invoice],[data-invoice-order],[data-invoice-client],[data-pick-invoice-client],[data-add-line],[data-del-line],[data-delete-invoice],[data-invoice-paid],[data-invoice-unpaid],[data-share-invoice],[data-download-invoice],[data-approve-user]");
+    var el = t.closest("[data-tab],[data-action],[data-order-filter],[data-open-order],[data-open-client],[data-advance-order],[data-edit-client],[data-delete-client],[data-new-order-for],[data-edit-order],[data-delete-order],[data-set-status],[data-del-payment],[data-print-order],[data-modal-overlay],[data-an-shift],[data-delete-user],[data-inv-cat],[data-open-item],[data-edit-item],[data-delete-item],[data-stock-in],[data-stock-out],[data-add-photo],[data-open-photo],[data-delete-photo],[data-back-to],[data-open-invoice],[data-invoice-order],[data-invoice-client],[data-pick-invoice-client],[data-add-line],[data-del-line],[data-delete-invoice],[data-invoice-paid],[data-invoice-unpaid],[data-share-invoice],[data-download-invoice],[data-approve-user],[data-theme-set]");
     if (!el) return;
+
+    if (el.hasAttribute("data-theme-set")) { setTheme(el.getAttribute("data-theme-set")); return; }
 
     if (el.hasAttribute("data-open-invoice")) { showInvoiceDoc(el.getAttribute("data-open-invoice")); return; }
     if (el.hasAttribute("data-invoice-order")) { showInvoiceBuilder({ orderId: el.getAttribute("data-invoice-order") }); return; }
