@@ -782,6 +782,67 @@ input, select, textarea { font: inherit; color: inherit; }
   background: var(--surface-2);
 }
 
+/* Photo gallery (the lightbox).
+
+   Every photo on the order sits in one horizontal track that snaps, so a
+   swipe moves to the next picture the way a phone photo album does. This is
+   the browser's own scrolling rather than hand-written touch handling, which
+   is why it keeps the momentum and rubber-banding people expect. */
+
+.lightbox { position: relative; }
+
+.lightbox-track {
+  display: flex;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  border-radius: 10px;
+  min-height: 200px;   /* hold the height while the pictures load in */
+}
+
+.lightbox-track::-webkit-scrollbar { display: none; }
+
+.lightbox-slide {
+  flex: 0 0 100%;
+  min-width: 0;
+  scroll-snap-align: center;
+}
+
+.lightbox-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  background: rgba(20, 14, 10, 0.55);   /* sits on the photo, dark in both themes */
+  color: #fff;
+  font-size: 22px;
+  line-height: 1;
+  padding-bottom: 3px;
+  transition: opacity 0.15s, background 0.15s;
+}
+
+.lightbox-nav:hover { background: rgba(20, 14, 10, 0.8); }
+.lightbox-prev { left: 8px; }
+.lightbox-next { right: 8px; }
+
+/* at the first or last photo the arrow gets out of the way entirely */
+.lightbox-nav:disabled { opacity: 0; pointer-events: none; }
+
+.lightbox-count {
+  margin-top: 8px;
+  text-align: center;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
 /* payments */
 
 .pay-table { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 14.5px; }
@@ -1349,6 +1410,11 @@ input, select, textarea { font: inherit; color: inherit; }
   /* photos belong on the job card: let the strip wrap instead of scrolling */
   .photo-strip { overflow: visible !important; flex-wrap: wrap; }
   .photo-thumb { width: 150px; height: 150px; break-inside: avoid; }
+
+  /* a gallery printed from the lightbox stacks, rather than clipping to
+     whichever photo happened to be on screen */
+  .lightbox-track { display: block; overflow: visible !important; min-height: 0; }
+  .lightbox-slide { break-inside: avoid; margin-bottom: 8px; }
 
   /* invoices print as a clean document, not as an app modal */
   .invoice-doc { font-size: 11.5pt; }

@@ -963,36 +963,124 @@
     });
   }
 
+  function photoTitle(p) { return p.caption || kindLabel(p.kind); }
+
+  function photoSub(p) {
+    return p.orderId ? kindLabel(p.kind) + " · " + fmtDate(p.createdAt) : fmtDate(p.createdAt);
+  }
+
+  // Opening a photo gives you the whole set, not just the one tapped: all the
+  // photos on that order (or stock item) are laid out in a snapping track, so
+  // a swipe moves to the next picture like a phone photo album. Arrows and the
+  // left/right keys do the same with a mouse or keyboard. The heading, the
+  // counter and the Delete button follow whichever photo you have scrolled to.
+  // With a single photo the controls are left out and it behaves as before.
   function showPhotoLightbox(id) {
     var p = photoById(id);
     if (!p) return;
+    var list = p.orderId ? photosForOrder(p.orderId) : photosForItem(p.itemId);
+    var start = 0;
+    for (var i = 0; i < list.length; i++) if (list[i].id === id) start = i;
+    var many = list.length > 1;
     var backTo = p.orderId ? "order:" + p.orderId : "item:" + p.itemId;
+
     openModal(
-      modalHead(esc(p.caption || kindLabel(p.kind)), p.orderId ? esc(kindLabel(p.kind)) + " · " + esc(fmtDate(p.createdAt)) : esc(fmtDate(p.createdAt))) +
+      modalHead(esc(photoTitle(p)), esc(photoSub(p))) +
       '<div class="modal-body">' +
-        '<img class="photo-full" alt="' + esc(p.caption || kindLabel(p.kind)) + '" data-photo-path="' + esc(p.path) + '">' +
+        '<div class="lightbox">' +
+          '<div class="lightbox-track" id="lbTrack">' +
+            list.map(function (x) {
+              return '<div class="lightbox-slide">' +
+                '<img class="photo-full" alt="' + esc(photoTitle(x)) + '" data-photo-path="' + esc(x.path) + '">' +
+              "</div>";
+            }).join("") +
+          "</div>" +
+          (many
+            ? '<button class="lightbox-nav lightbox-prev no-print" data-lb-step="-1" aria-label="Previous photo">&lsaquo;</button>' +
+              '<button class="lightbox-nav lightbox-next no-print" data-lb-step="1" aria-label="Next photo">&rsaquo;</button>'
+            : "") +
+        "</div>" +
+        (many ? '<div class="lightbox-count no-print" id="lbCount"></div>' : "") +
         '<div class="modal-actions">' +
-          (canDeletePhoto(p) ? '<button class="btn btn-danger btn-sm" data-delete-photo="' + p.id + '">Delete</button>' : "") +
+          '<button class="btn btn-danger btn-sm" id="lbDelete" data-delete-photo="' + p.id + '"' +
+            (canDeletePhoto(p) ? "" : " hidden") + ">Delete</button>" +
           '<span class="spacer"></span>' +
           '<button class="btn btn-ghost" data-back-to="' + backTo + '">Back</button>' +
         "</div>" +
       "</div>"
     );
+
+    var track = $("#lbTrack");
+    // land on the photo that was tapped without scrolling past the others
+    track.scrollLeft = start * track.clientWidth;
+
+    var frame = null;
+    function sync() {
+      frame = null;
+      var cur = list[lbIndex()];
+      if (!cur) return;
+      $(".modal-head h2").textContent = photoTitle(cur);
+      var sub = $(".modal-head .modal-sub");
+      if (sub) sub.textContent = photoSub(cur);
+      var count = $("#lbCount");
+      if (count) count.textContent = (lbIndex() + 1) + " of " + list.length;
+      var del = $("#lbDelete");
+      if (del) {
+        del.setAttribute("data-delete-photo", cur.id);
+        del.hidden = !canDeletePhoto(cur);
+      }
+      $all("[data-lb-step]").forEach(function (b) {
+        var dir = Number(b.getAttribute("data-lb-step"));
+        b.disabled = dir < 0 ? lbIndex() <= 0 : lbIndex() >= list.length - 1;
+      });
+    }
+    // a swipe fires scroll continuously; coalesce it to one update per frame
+    track.addEventListener("scroll", function () {
+      if (!frame) frame = requestAnimationFrame(sync);
+    });
+    sync();
     hydratePhotos();
+  }
+
+  // Which photo the open gallery is resting on.
+  function lbIndex() {
+    var t = $("#lbTrack");
+    if (!t) return 0;
+    var w = t.clientWidth || 1;
+    var n = t.children.length - 1;
+    return Math.max(0, Math.min(n, Math.round(t.scrollLeft / w)));
+  }
+
+  function lbStep(dir) {
+    var t = $("#lbTrack");
+    if (!t) return;
+    var left = (lbIndex() + dir) * t.clientWidth;
+    if (t.scrollTo) t.scrollTo({ left: left, behavior: "smooth" });
+    else t.scrollLeft = left;
   }
 
   function deletePhoto(id) {
     var p = photoById(id);
     if (!p || !canDeletePhoto(p)) return;
     if (!confirm("Delete this photo? This cannot be undone.")) return;
-    var backTo = p.orderId ? "order:" + p.orderId : "item:" + p.itemId;
+
+    // Work out the neighbour before the row goes, so someone deleting one bad
+    // shot mid-gallery carries on where they were instead of being thrown all
+    // the way back to the order.
+    var siblings = p.orderId ? photosForOrder(p.orderId) : photosForItem(p.itemId);
+    var at = 0;
+    for (var i = 0; i < siblings.length; i++) if (siblings[i].id === id) at = i;
+    var goTo = siblings[at + 1] || siblings[at - 1] || null;
+
     sb.from("photos").delete().eq("id", id).then(function (res) {
       if (res.error) return fail(res.error, "Could not delete photo");
       return sb.storage.from("photos").remove([p.path]).then(function () {
         db.photos = db.photos.filter(function (x) { return x.id !== id; });
         delete signedCache[p.path];
         toast("Photo deleted");
-        if (p.orderId) showOrderDetail(p.orderId); else showItemDetail(p.itemId);
+        if (goTo) showPhotoLightbox(goTo.id);
+        else if (p.orderId) showOrderDetail(p.orderId);
+        else showItemDetail(p.itemId);
       });
     });
   }
@@ -2946,7 +3034,7 @@
   document.addEventListener("click", function (e) {
     var t = e.target;
 
-    var el = t.closest("[data-tab],[data-action],[data-order-filter],[data-open-order],[data-open-client],[data-advance-order],[data-edit-client],[data-delete-client],[data-new-order-for],[data-edit-order],[data-delete-order],[data-set-status],[data-del-payment],[data-print-order],[data-modal-overlay],[data-an-shift],[data-delete-user],[data-inv-cat],[data-open-item],[data-edit-item],[data-delete-item],[data-stock-in],[data-stock-out],[data-add-photo],[data-open-photo],[data-delete-photo],[data-back-to],[data-open-invoice],[data-invoice-order],[data-invoice-client],[data-pick-invoice-client],[data-add-line],[data-del-line],[data-delete-invoice],[data-invoice-paid],[data-invoice-unpaid],[data-download-invoice],[data-approve-user],[data-theme-set],[data-share-image],[data-image-invoice]");
+    var el = t.closest("[data-tab],[data-action],[data-order-filter],[data-open-order],[data-open-client],[data-advance-order],[data-edit-client],[data-delete-client],[data-new-order-for],[data-edit-order],[data-delete-order],[data-set-status],[data-del-payment],[data-print-order],[data-modal-overlay],[data-an-shift],[data-delete-user],[data-inv-cat],[data-open-item],[data-edit-item],[data-delete-item],[data-stock-in],[data-stock-out],[data-add-photo],[data-open-photo],[data-delete-photo],[data-back-to],[data-open-invoice],[data-invoice-order],[data-invoice-client],[data-pick-invoice-client],[data-add-line],[data-del-line],[data-delete-invoice],[data-invoice-paid],[data-invoice-unpaid],[data-download-invoice],[data-approve-user],[data-theme-set],[data-share-image],[data-image-invoice],[data-lb-step]");
     if (!el) return;
 
     if (el.hasAttribute("data-theme-set")) { setTheme(el.getAttribute("data-theme-set")); return; }
@@ -2980,6 +3068,7 @@
     if (el.hasAttribute("data-invoice-paid")) { setInvoicePaid(el.getAttribute("data-invoice-paid"), true); return; }
     if (el.hasAttribute("data-invoice-unpaid")) { setInvoicePaid(el.getAttribute("data-invoice-unpaid"), false); return; }
 
+    if (el.hasAttribute("data-lb-step")) { lbStep(Number(el.getAttribute("data-lb-step"))); return; }
     if (el.hasAttribute("data-add-photo")) { showPhotoUpload(el.getAttribute("data-add-photo")); return; }
     if (el.hasAttribute("data-open-photo")) { showPhotoLightbox(el.getAttribute("data-open-photo")); return; }
     if (el.hasAttribute("data-delete-photo")) { deletePhoto(el.getAttribute("data-delete-photo")); return; }
@@ -3207,6 +3296,11 @@
   }
 
   document.addEventListener("keydown", function (e) {
-    if (e.key === "Escape") closeModal();
+    if (e.key === "Escape") { closeModal(); return; }
+    // arrows walk the photo gallery, but only while it is the thing on screen
+    if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && $("#lbTrack")) {
+      e.preventDefault();
+      lbStep(e.key === "ArrowRight" ? 1 : -1);
+    }
   });
 })();
