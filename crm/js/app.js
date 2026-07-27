@@ -743,7 +743,8 @@
           '<button type="button" class="btn btn-ghost" data-action="close-modal">Cancel</button>' +
           '<button type="submit" class="btn btn-primary">' + (isIn ? "Add to stock" : "Remove from stock") + "</button>" +
         "</div>" +
-      "</form></div>"
+      "</form></div>",
+      "item:" + itemId   // Cancel and ✕ go back to the item, not out of it
     );
   }
 
@@ -2375,11 +2376,14 @@
   function closeModal() {
     $("#modalRoot").innerHTML = "";
     document.body.style.overflow = "";
+    orderBackTo = null;   // the next order opens as a fresh trail
   }
 
   function goBackTo(key) {
     var id = key.slice(key.indexOf(":") + 1);
-    if (key.indexOf("order:") === 0) showOrderDetail(id); else showItemDetail(id);
+    if (key.indexOf("order:") === 0) showOrderDetail(id);
+    else if (key.indexOf("client:") === 0) showClientDetail(id);
+    else showItemDetail(id);
   }
 
   // What the ✕, the Cancel buttons, the Escape key and a tap on the backdrop
@@ -2547,7 +2551,7 @@
         (orders.length ? orders.map(function (o) {
           var st = statusOf(o);
           return (
-            '<div class="mini-order" data-open-order="' + o.id + '">' +
+            '<div class="mini-order" data-open-order="' + o.id + '" data-from-client="' + c.id + '">' +
               "<div><div class=\"mo-title\">" + esc(o.ref) + " · " + esc(o.garment || "Order") + '</div>' +
               '<div class="mo-sub">' + (o.dueDate ? "Due " + fmtDateShort(o.dueDate) : "") + (isAdmin() ? (o.dueDate ? " · " : "") + money(o.price) : "") + "</div></div>" +
               '<span class="pill st-' + st.key + '">' + st.label + "</span>" +
@@ -2687,7 +2691,16 @@
 
   /* ---------- Order detail ---------- */
 
-  function showOrderDetail(id) {
+  // Where the open order's ✕ returns to, remembered rather than passed in.
+  // showOrderDetail is re-run after a status change, a payment and every photo
+  // action; threading the target through all of those would lose the trail back
+  // to the client the first time someone advanced an order from her page.
+  // Opening an order sets it, the re-renders leave it alone, and closeModal
+  // clears it so the next order does not inherit a stale trail.
+  var orderBackTo = null;
+
+  function showOrderDetail(id, backTo) {
+    if (backTo !== undefined) orderBackTo = backTo;
     var o = orderById(id);
     if (!o) return;
     var c = clientById(o.clientId);
@@ -2762,7 +2775,8 @@
           (canEdit() ? '<button class="btn btn-ghost" data-edit-order="' + o.id + '">✎ Edit</button>' : "") +
           (o.status === "ready" && canEdit() ? '<button class="btn btn-primary" data-set-status="delivered" data-order="' + o.id + '">✓ Mark Delivered</button>' : "") +
         "</div>" +
-      "</div>"
+      "</div>",
+      orderBackTo
     );
     hydratePhotos();
   }
@@ -3149,7 +3163,13 @@
       return;
     }
 
-    if (el.hasAttribute("data-open-order")) { showOrderDetail(el.getAttribute("data-open-order")); return; }
+    if (el.hasAttribute("data-open-order")) {
+      // reached from a client's order list, the ✕ goes back to her; from the
+      // Orders tab or the dashboard there is nothing behind it, so it closes
+      showOrderDetail(el.getAttribute("data-open-order"),
+        el.hasAttribute("data-from-client") ? "client:" + el.getAttribute("data-from-client") : null);
+      return;
+    }
     if (el.hasAttribute("data-open-client")) { showClientDetail(el.getAttribute("data-open-client")); return; }
     if (el.hasAttribute("data-edit-client")) { showClientForm(el.getAttribute("data-edit-client")); return; }
     if (el.hasAttribute("data-delete-client")) { deleteClient(el.getAttribute("data-delete-client")); return; }
