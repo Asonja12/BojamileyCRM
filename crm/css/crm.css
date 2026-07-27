@@ -1282,6 +1282,29 @@ input, select, textarea { font: inherit; color: inherit; }
   .main { padding: 14px 10px 90px; }
 }
 
+/* ---------- Touch devices: never auto-zoom on focus ---------- */
+
+/* iOS Safari and Chrome on Android zoom the page in when a form control with
+   a font smaller than 16px takes focus, and they do NOT zoom back out when it
+   loses focus. Tapping Email on the sign-in screen was enough to leave the
+   whole app magnified for the rest of the session.
+
+   16px on touch pointers is the cure. Note what we deliberately do NOT do:
+   maximum-scale / user-scalable=no on the viewport would also stop the zoom,
+   but it blocks pinch-zoom for someone who wants to look closely at a
+   measurement or a photo. */
+@media (pointer: coarse) {
+  .field input, .field select, .field textarea,
+  .measure-grid .field input,
+  .search-input,
+  .pay-form input,
+  .inv-lines input,
+  .pending-actions select,
+  .team-row select {
+    font-size: 16px;
+  }
+}
+
 /* ---------- Print (job card) ---------- */
 
 @page { margin: 12mm; }
