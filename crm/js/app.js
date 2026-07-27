@@ -1330,8 +1330,7 @@
           (v.status !== "paid"
             ? '<button class="btn btn-ghost btn-sm" data-invoice-paid="' + v.id + '">✓ Mark paid</button>'
             : '<button class="btn btn-ghost btn-sm" data-invoice-unpaid="' + v.id + '">Mark unpaid</button>') +
-          '<button class="btn btn-primary" data-share-invoice="' + v.id + '">💬 Send PDF on WhatsApp</button>' +
-          '<button class="btn btn-primary" data-share-image="' + v.id + '">🖼 Send image on WhatsApp</button>' +
+          '<button class="btn btn-primary" data-share-image="' + v.id + '">Send image on WhatsApp</button>' +
         "</div>" +
       "</div>"
     );
@@ -1489,45 +1488,6 @@
 
   function invoiceFileName(v) {
     return (v.number + "-" + (v.clientName || "invoice")).replace(/[^\w\-]+/g, "-") + ".pdf";
-  }
-
-  // WhatsApp's link API cannot carry a file, so we hand the real PDF to the
-  // phone's native share sheet, where WhatsApp appears as a target and the
-  // contact is picked there (so this works even with no phone number saved).
-  // Desktop and older browsers fall back to downloading the PDF plus a
-  // prefilled chat.
-  function shareInvoice(id) {
-    var v = invoiceById(id);
-    if (!v) return;
-    var doc = invoicePdf(v);
-    if (!doc) { toast("PDF engine did not load", true); return; }
-
-    var blob = doc.output("blob");
-    var file = null;
-    try {
-      file = new File([blob], invoiceFileName(v), { type: "application/pdf" });
-    } catch (e) { /* File constructor unavailable on this browser */ }
-
-    if (file && navigator.canShare && navigator.canShare({ files: [file] }) && navigator.share) {
-      navigator.share({
-        files: [file],
-        title: v.number,
-        text: invoiceMessage(v)
-      }).catch(function () { /* user dismissed the share sheet */ });
-      return;
-    }
-
-    // Fallback: save the PDF, then open the chat so it can be attached.
-    downloadInvoice(id);
-    var wa = phoneDigits(v.clientPhone);
-    var msg = encodeURIComponent(invoiceMessage(v));
-    if (wa) {
-      toast("PDF saved — attach it in the WhatsApp chat");
-      window.open("https://wa.me/" + wa + "?text=" + msg, "_blank", "noopener");
-    } else {
-      toast("PDF saved — open WhatsApp and attach it");
-      window.open("https://wa.me/?text=" + msg, "_blank", "noopener");
-    }
   }
 
   function downloadInvoice(id) {
@@ -1767,7 +1727,11 @@
     toast("Image saved ✓");
   }
 
-  // Mirrors shareInvoice, with a picture in place of the file.
+  // WhatsApp's link API cannot carry a file, so we hand the picture to the
+  // phone's native share sheet, where WhatsApp appears as a target and the
+  // contact is picked there (so this works even with no phone number saved).
+  // Desktop and older browsers fall back to saving the picture plus a
+  // prefilled chat.
   function shareInvoiceImage(id) {
     var v = invoiceById(id);
     if (!v) return;
@@ -2982,7 +2946,7 @@
   document.addEventListener("click", function (e) {
     var t = e.target;
 
-    var el = t.closest("[data-tab],[data-action],[data-order-filter],[data-open-order],[data-open-client],[data-advance-order],[data-edit-client],[data-delete-client],[data-new-order-for],[data-edit-order],[data-delete-order],[data-set-status],[data-del-payment],[data-print-order],[data-modal-overlay],[data-an-shift],[data-delete-user],[data-inv-cat],[data-open-item],[data-edit-item],[data-delete-item],[data-stock-in],[data-stock-out],[data-add-photo],[data-open-photo],[data-delete-photo],[data-back-to],[data-open-invoice],[data-invoice-order],[data-invoice-client],[data-pick-invoice-client],[data-add-line],[data-del-line],[data-delete-invoice],[data-invoice-paid],[data-invoice-unpaid],[data-share-invoice],[data-download-invoice],[data-approve-user],[data-theme-set],[data-share-image],[data-image-invoice]");
+    var el = t.closest("[data-tab],[data-action],[data-order-filter],[data-open-order],[data-open-client],[data-advance-order],[data-edit-client],[data-delete-client],[data-new-order-for],[data-edit-order],[data-delete-order],[data-set-status],[data-del-payment],[data-print-order],[data-modal-overlay],[data-an-shift],[data-delete-user],[data-inv-cat],[data-open-item],[data-edit-item],[data-delete-item],[data-stock-in],[data-stock-out],[data-add-photo],[data-open-photo],[data-delete-photo],[data-back-to],[data-open-invoice],[data-invoice-order],[data-invoice-client],[data-pick-invoice-client],[data-add-line],[data-del-line],[data-delete-invoice],[data-invoice-paid],[data-invoice-unpaid],[data-download-invoice],[data-approve-user],[data-theme-set],[data-share-image],[data-image-invoice]");
     if (!el) return;
 
     if (el.hasAttribute("data-theme-set")) { setTheme(el.getAttribute("data-theme-set")); return; }
@@ -3009,7 +2973,6 @@
       recalcInvoice();
       return;
     }
-    if (el.hasAttribute("data-share-invoice")) { shareInvoice(el.getAttribute("data-share-invoice")); return; }
     if (el.hasAttribute("data-share-image")) { shareInvoiceImage(el.getAttribute("data-share-image")); return; }
     if (el.hasAttribute("data-image-invoice")) { downloadInvoiceImage(el.getAttribute("data-image-invoice")); return; }
     if (el.hasAttribute("data-download-invoice")) { downloadInvoice(el.getAttribute("data-download-invoice")); return; }
