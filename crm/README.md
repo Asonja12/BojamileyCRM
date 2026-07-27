@@ -84,7 +84,10 @@ Internet is required since data lives in the cloud.
 - **Photos:** attach pictures to an order (style reference, fabric, fitting,
   finished piece — each tagged) and to inventory items. The tailor can see
   exactly what to make instead of working from memory, and finished shots build
-  up a portfolio you can reuse on Instagram. Photos are shrunk automatically
+  up a portfolio you can reuse on Instagram. Tapping any picture opens the whole
+  set as a **gallery**: swipe sideways to go through them like a phone photo
+  album, or use the arrows and the left/right keys on a computer. The heading
+  and the "3 of 7" counter follow whichever photo you are on. Photos are shrunk automatically
   before upload so they stay quick on mobile data, are stored in a **private**
   bucket (served only through short-lived signed links), and print on the job
   card. Visible to the whole team — staff need the reference to sew. Staff can
