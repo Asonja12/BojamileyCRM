@@ -1324,12 +1324,14 @@
 
         '<div class="modal-actions no-print">' +
           '<button class="btn btn-ghost btn-sm" data-download-invoice="' + v.id + '">⬇ Download PDF</button>' +
+          '<button class="btn btn-ghost btn-sm" data-image-invoice="' + v.id + '">🖼 Save image</button>' +
           '<button class="btn btn-ghost btn-sm" data-print-order>🖨 Print</button>' +
           '<button class="btn btn-ghost btn-sm" data-delete-invoice="' + v.id + '">Delete</button>' +
           (v.status !== "paid"
             ? '<button class="btn btn-ghost btn-sm" data-invoice-paid="' + v.id + '">✓ Mark paid</button>'
             : '<button class="btn btn-ghost btn-sm" data-invoice-unpaid="' + v.id + '">Mark unpaid</button>') +
           '<button class="btn btn-primary" data-share-invoice="' + v.id + '">💬 Send PDF on WhatsApp</button>' +
+          '<button class="btn btn-primary" data-share-image="' + v.id + '">🖼 Send image on WhatsApp</button>' +
         "</div>" +
       "</div>"
     );
@@ -1554,6 +1556,247 @@
     }
     lines.push("", "Thank you!");
     return lines.join("\n");
+  }
+
+  /* ---- Image ---------------------------------------------------------
+     A picture lands in the WhatsApp chat already open, where a PDF
+     arrives as a file the client has to tap to read. Same invoice, drawn
+     on a canvas instead of screenshotting the modal, for the reasons the
+     PDF is drawn too: no extra library, and the text stays sharp.
+
+     The layout deliberately reuses the PDF's page geometry in
+     millimetres (A4, margins at 15 and 195) and only scales it, so the
+     two stay the same document and edits to one are easy to mirror.
+
+     One thing the image does better: canvas uses the real Montserrat
+     webfont, whose latin-ext range covers U+20A6, so the picture shows a
+     proper "₦" where the PDF has to fall back to "NGN".
+     -------------------------------------------------------------------- */
+
+  var IMG_W = 1240;          // A4 width at 150dpi: sharp on a phone, still a small file
+  var IMG_SCRATCH_H = 5000;  // draw into this, then crop down to the real height
+
+  function invoiceImageFileName(v) {
+    return (v.number + "-" + (v.clientName || "invoice")).replace(/[^\w\-]+/g, "-") + ".png";
+  }
+
+  function invoiceCanvas(v) {
+    var s = db.invoiceSettings || {};
+    var K = IMG_W / 210;                        // px per mm
+    function mm(n) { return n * K; }
+    function pt(n) { return n * 0.3528 * K; }   // the PDF's sizes are in points
+
+    var c = document.createElement("canvas");
+    c.width = IMG_W;
+    c.height = IMG_SCRATCH_H;
+    var x = c.getContext("2d");
+    x.fillStyle = "#fff";
+    x.fillRect(0, 0, c.width, c.height);
+    x.textBaseline = "alphabetic";
+
+    var L = mm(15), R = mm(195), y = mm(18);
+
+    function font(size, bold) {
+      x.font = (bold ? "700 " : "400 ") + pt(size).toFixed(1) + 'px "Montserrat", Arial, sans-serif';
+    }
+    function txt(t, px, py, align) {
+      x.textAlign = align || "left";
+      x.fillText(String(t == null ? "" : t), px, py);
+    }
+    function rule(colour, w) {
+      x.strokeStyle = colour;
+      x.lineWidth = w || mm(0.2);
+      x.beginPath(); x.moveTo(L, y); x.lineTo(R, y); x.stroke();
+    }
+    function roundRect(px, py, w, h, r) {
+      x.beginPath();
+      x.moveTo(px + r, py);
+      x.lineTo(px + w - r, py); x.quadraticCurveTo(px + w, py, px + w, py + r);
+      x.lineTo(px + w, py + h - r); x.quadraticCurveTo(px + w, py + h, px + w - r, py + h);
+      x.lineTo(px + r, py + h); x.quadraticCurveTo(px, py + h, px, py + h - r);
+      x.lineTo(px, py + r); x.quadraticCurveTo(px, py, px + r, py);
+      x.closePath(); x.fill();
+    }
+    // canvas has no line breaking of its own; measure against the live font
+    function wrap(t, maxW) {
+      var words = String(t == null ? "" : t).split(/\s+/), out = [], cur = "";
+      words.forEach(function (w) {
+        var test = cur ? cur + " " + w : w;
+        if (cur && x.measureText(test).width > maxW) { out.push(cur); cur = w; }
+        else cur = test;
+      });
+      if (cur) out.push(cur);
+      return out.length ? out : [""];
+    }
+
+    // header
+    font(17, true); x.fillStyle = "#b96a07";
+    txt(db.settings.businessName || "Bojamiley", L, y);
+
+    font(9, false); x.fillStyle = "#8a7d72";
+    var by = y + mm(5);
+    [s.businessAddress, s.businessPhone, s.businessEmail].forEach(function (t) {
+      if (t) { txt(t, L, by); by += mm(4); }
+    });
+
+    font(20, true); x.fillStyle = "#b96a07";
+    txt("INVOICE", R, y, "right");
+    font(10, true); x.fillStyle = "#2b2320";
+    txt(v.number, R, y + mm(6), "right");
+    font(9, false); x.fillStyle = "#8a7d72";
+    txt(fmtDateShort(v.issueDate), R, y + mm(11), "right");
+
+    y = Math.max(by, y + mm(15)) + mm(3);
+    rule("#f49721", mm(0.6));
+    y += mm(8);
+
+    // billed to
+    font(8, false); x.fillStyle = "#8a7d72";
+    txt("BILLED TO", L, y);
+    y += mm(5);
+    font(12, true); x.fillStyle = "#2b2320";
+    txt(v.clientName || "-", L, y);
+    font(9, false); x.fillStyle = "#5a5048";
+    [v.clientPhone, v.clientAddress].forEach(function (t) {
+      if (t) { y += mm(4.5); txt(t, L, y); }
+    });
+
+    // items
+    y += mm(9);
+    font(8, false); x.fillStyle = "#8a7d72";
+    txt("DESCRIPTION", L, y);
+    txt("QTY", mm(130), y, "right");
+    txt("PRICE", mm(158), y, "right");
+    txt("AMOUNT", R, y, "right");
+    y += mm(2.5); rule("#e8ddd2"); y += mm(5);
+
+    font(10, false); x.fillStyle = "#2b2320";
+    (v.items || []).forEach(function (it) {
+      var wrapped = wrap(it.description, mm(108));
+      wrapped.forEach(function (ln, i) { txt(ln, L, y + mm(4.6 * i)); });
+      txt(it.qty, mm(130), y, "right");
+      txt(money(it.unit_price), mm(158), y, "right");
+      txt(money(it.amount), R, y, "right");
+      y += Math.max(mm(4.6) * wrapped.length, mm(5)) + mm(2.5);
+      rule("#e8ddd2"); y += mm(5);
+    });
+
+    // totals
+    var tx = mm(130), ty = y + mm(2);
+    function row(label, value, bold) {
+      font(bold ? 11 : 10, bold);
+      txt(label, tx, ty);
+      txt(value, R, ty, "right");
+      ty += bold ? mm(6.5) : mm(5.5);
+    }
+    x.fillStyle = "#2b2320";
+    row("Subtotal", money(v.subtotal));
+    if (v.discount > 0) row("Discount", "-" + money(v.discount));
+    row("Total", money(v.total), true);
+    if (v.amountPaid > 0) row("Paid", money(v.amountPaid));
+    row("Balance due", money(v.balance), true);
+    y = ty + mm(4);
+
+    if (v.notes) {
+      font(9, false); x.fillStyle = "#8a7d72";
+      var nl = wrap(v.notes, R - L);
+      nl.forEach(function (ln, i) { txt(ln, L, y + mm(4.2 * i)); });
+      y += mm(4.2) * nl.length + mm(4);
+    }
+
+    if (s.bankName || s.bankAccountNumber) {
+      var boxH = mm(10 + (s.bankName ? 5 : 0) + (s.bankAccountName ? 5 : 0) + (s.bankAccountNumber ? 6 : 0));
+      x.fillStyle = "#fdeedd";
+      roundRect(L, y, R - L, boxH, mm(2));
+      var byy = y + mm(6);
+      font(8, true); x.fillStyle = "#b96a07";
+      txt("PAYMENT DETAILS", L + mm(4), byy);
+      x.fillStyle = "#2b2320";
+      font(10, false);
+      if (s.bankName) { byy += mm(5); txt(s.bankName, L + mm(4), byy); }
+      if (s.bankAccountName) { byy += mm(5); txt(s.bankAccountName, L + mm(4), byy); }
+      if (s.bankAccountNumber) {
+        byy += mm(6);
+        font(13, true);
+        txt(s.bankAccountNumber, L + mm(4), byy);
+      }
+      y += boxH + mm(6);
+    }
+
+    font(9, false); x.fillStyle = "#8a7d72";
+    txt("Thank you for your patronage.", IMG_W / 2, y + mm(2), "center");
+    y += mm(8);
+
+    // crop the scratch canvas down to what was actually drawn
+    var out = document.createElement("canvas");
+    out.width = IMG_W;
+    out.height = Math.max(mm(60), Math.min(Math.ceil(y), IMG_SCRATCH_H));
+    var o = out.getContext("2d");
+    o.fillStyle = "#fff";
+    o.fillRect(0, 0, out.width, out.height);
+    o.drawImage(c, 0, 0);
+    return out;
+  }
+
+  // Kept synchronous on purpose. navigator.share() has to be reached inside
+  // the tap that started it, and awaiting canvas.toBlob() loses that gesture
+  // on iOS, so toDataURL (which is synchronous) is used instead.
+  function invoiceImageBlob(v) {
+    var url = invoiceCanvas(v).toDataURL("image/png");
+    var parts = url.split(",");
+    var bin = atob(parts[1]);
+    var arr = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    return new Blob([arr], { type: "image/png" });
+  }
+
+  function saveBlob(blob, name) {
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 5000);
+  }
+
+  function downloadInvoiceImage(id) {
+    var v = invoiceById(id);
+    if (!v) return;
+    saveBlob(invoiceImageBlob(v), invoiceImageFileName(v));
+    toast("Image saved ✓");
+  }
+
+  // Mirrors shareInvoice, with a picture in place of the file.
+  function shareInvoiceImage(id) {
+    var v = invoiceById(id);
+    if (!v) return;
+    var blob = invoiceImageBlob(v);
+    var file = null;
+    try {
+      file = new File([blob], invoiceImageFileName(v), { type: "image/png" });
+    } catch (e) { /* File constructor unavailable on this browser */ }
+
+    if (file && navigator.canShare && navigator.canShare({ files: [file] }) && navigator.share) {
+      navigator.share({
+        files: [file],
+        title: v.number,
+        text: invoiceMessage(v)
+      }).catch(function () { /* user dismissed the share sheet */ });
+      return;
+    }
+
+    // Fallback: save the picture, then open the chat so it can be attached.
+    saveBlob(blob, invoiceImageFileName(v));
+    var wa = phoneDigits(v.clientPhone);
+    var msg = encodeURIComponent(invoiceMessage(v));
+    if (wa) {
+      toast("Image saved — attach it in the WhatsApp chat");
+      window.open("https://wa.me/" + wa + "?text=" + msg, "_blank", "noopener");
+    } else {
+      toast("Image saved — open WhatsApp and attach it");
+      window.open("https://wa.me/?text=" + msg, "_blank", "noopener");
+    }
   }
 
   function setInvoicePaid(id, paidInFull) {
@@ -2739,7 +2982,7 @@
   document.addEventListener("click", function (e) {
     var t = e.target;
 
-    var el = t.closest("[data-tab],[data-action],[data-order-filter],[data-open-order],[data-open-client],[data-advance-order],[data-edit-client],[data-delete-client],[data-new-order-for],[data-edit-order],[data-delete-order],[data-set-status],[data-del-payment],[data-print-order],[data-modal-overlay],[data-an-shift],[data-delete-user],[data-inv-cat],[data-open-item],[data-edit-item],[data-delete-item],[data-stock-in],[data-stock-out],[data-add-photo],[data-open-photo],[data-delete-photo],[data-back-to],[data-open-invoice],[data-invoice-order],[data-invoice-client],[data-pick-invoice-client],[data-add-line],[data-del-line],[data-delete-invoice],[data-invoice-paid],[data-invoice-unpaid],[data-share-invoice],[data-download-invoice],[data-approve-user],[data-theme-set]");
+    var el = t.closest("[data-tab],[data-action],[data-order-filter],[data-open-order],[data-open-client],[data-advance-order],[data-edit-client],[data-delete-client],[data-new-order-for],[data-edit-order],[data-delete-order],[data-set-status],[data-del-payment],[data-print-order],[data-modal-overlay],[data-an-shift],[data-delete-user],[data-inv-cat],[data-open-item],[data-edit-item],[data-delete-item],[data-stock-in],[data-stock-out],[data-add-photo],[data-open-photo],[data-delete-photo],[data-back-to],[data-open-invoice],[data-invoice-order],[data-invoice-client],[data-pick-invoice-client],[data-add-line],[data-del-line],[data-delete-invoice],[data-invoice-paid],[data-invoice-unpaid],[data-share-invoice],[data-download-invoice],[data-approve-user],[data-theme-set],[data-share-image],[data-image-invoice]");
     if (!el) return;
 
     if (el.hasAttribute("data-theme-set")) { setTheme(el.getAttribute("data-theme-set")); return; }
@@ -2767,6 +3010,8 @@
       return;
     }
     if (el.hasAttribute("data-share-invoice")) { shareInvoice(el.getAttribute("data-share-invoice")); return; }
+    if (el.hasAttribute("data-share-image")) { shareInvoiceImage(el.getAttribute("data-share-image")); return; }
+    if (el.hasAttribute("data-image-invoice")) { downloadInvoiceImage(el.getAttribute("data-image-invoice")); return; }
     if (el.hasAttribute("data-download-invoice")) { downloadInvoice(el.getAttribute("data-download-invoice")); return; }
     if (el.hasAttribute("data-delete-invoice")) { deleteInvoice(el.getAttribute("data-delete-invoice")); return; }
     if (el.hasAttribute("data-invoice-paid")) { setInvoicePaid(el.getAttribute("data-invoice-paid"), true); return; }
