@@ -926,7 +926,8 @@
           '<button type="button" class="btn btn-ghost" data-action="close-modal">Cancel</button>' +
           '<button type="submit" class="btn btn-primary">Upload</button>' +
         "</div>" +
-      "</form></div>"
+      "</form></div>",
+      subjectKey   // Cancel and ✕ go back to the order, not out of it
     );
   }
 
@@ -1007,7 +1008,8 @@
           '<span class="spacer"></span>' +
           '<button class="btn btn-ghost" data-back-to="' + backTo + '">Back</button>' +
         "</div>" +
-      "</div>"
+      "</div>",
+      backTo
     );
 
     var track = $("#lbTrack");
@@ -2353,11 +2355,19 @@
      MODALS
      ============================================================ */
 
-  function openModal(html) {
+  // backTo ("order:<id>" or "item:<id>") marks this as a screen opened from
+  // another one, so dismissing it steps back there instead of closing the lot.
+  // The attribute goes on the card and is deliberately NOT data-back-to: that
+  // one is in the delegated click selector, and a container carrying it would
+  // fire on every click anywhere inside the modal.
+  function openModal(html, backTo) {
     var root = $("#modalRoot");
     root.innerHTML =
       '<div class="modal-overlay" data-modal-overlay>' +
-        '<div class="modal-card" role="dialog" aria-modal="true">' + html + "</div>" +
+        '<div class="modal-card" role="dialog" aria-modal="true"' +
+          (backTo ? ' data-modal-back="' + esc(backTo) + '"' : "") + ">" +
+          html +
+        "</div>" +
       "</div>";
     document.body.style.overflow = "hidden";
   }
@@ -2372,16 +2382,16 @@
     if (key.indexOf("order:") === 0) showOrderDetail(id); else showItemDetail(id);
   }
 
-  // What the ✕, the Escape key and a tap on the backdrop all do.
+  // What the ✕, the Cancel buttons, the Escape key and a tap on the backdrop
+  // all do.
   //
-  // The photo gallery replaces the order in the same modal root rather than
-  // stacking on top of it, so dismissing it plainly would take the order away
-  // with it and you would have to find the order again to see the next photo.
-  // While the gallery is open, all three send you back to the order instead;
-  // the order's own ✕ still closes everything.
+  // Screens opened from the order (the photo gallery, Add photo) replace it in
+  // the same modal root rather than stacking on top of it, so dismissing them
+  // plainly would take the order away too and you would have to go and find it
+  // again. Those step back to the order; everything else closes as before.
   function dismissModal() {
-    var back = $("#lbTrack") && $("#modalRoot [data-back-to]");
-    if (back) goBackTo(back.getAttribute("data-back-to"));
+    var card = $("#modalRoot [data-modal-back]");
+    if (card) goBackTo(card.getAttribute("data-modal-back"));
     else closeModal();
   }
 
