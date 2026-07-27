@@ -94,16 +94,15 @@ Internet is required since data lives in the cloud.
   editable, with optional discount, deposit already paid, due date and terms.
   Each invoice gets a number (INV-001...) from the database and **snapshots** the
   amounts and client details, so an invoice already given to a client never
-  changes if the order is edited later. **Download a real PDF**, print it, or
-  **send the PDF on WhatsApp**: on a phone this opens the native share sheet with
-  the file attached; on desktop the PDF downloads and WhatsApp opens with the
-  message ready, since WhatsApp links cannot carry a file on their own.
-  The same invoice can also be sent **as a picture** (*Send image on WhatsApp*,
-  or *Save image* to keep a copy). A picture shows up straight away in the chat,
-  where a PDF arrives as a file the client has to tap to open, so it is usually
-  the friendlier one to send. It is the same document either way, and because the
-  picture is drawn with the studio's own font it prints a proper `₦` where the PDF
-  has to fall back to `NGN`.
+  changes if the order is edited later. **Download a real PDF**, print it, save
+  it as a picture, or **send it to the client on WhatsApp as a picture**: on a
+  phone this opens the native share sheet with the picture attached; on desktop
+  the picture is saved and WhatsApp opens with the message ready, since WhatsApp
+  links cannot carry a file on their own. A picture is sent rather than the PDF
+  because it shows up straight away in the chat, where a PDF arrives as a file
+  the client has to tap to open. It is the same document either way, and because
+  the picture is drawn with the studio's own font it shows a proper `₦` where the
+  PDF has to fall back to `NGN`.
   Your business address and bank account are set once in
   Menu → 🧾 Invoice details and print on every invoice; they live in an Admin-only
   table, so staff never see them. Amounts print as `NGN 35,000` in the PDF because
