@@ -2367,6 +2367,24 @@
     document.body.style.overflow = "";
   }
 
+  function goBackTo(key) {
+    var id = key.slice(key.indexOf(":") + 1);
+    if (key.indexOf("order:") === 0) showOrderDetail(id); else showItemDetail(id);
+  }
+
+  // What the ✕, the Escape key and a tap on the backdrop all do.
+  //
+  // The photo gallery replaces the order in the same modal root rather than
+  // stacking on top of it, so dismissing it plainly would take the order away
+  // with it and you would have to find the order again to see the next photo.
+  // While the gallery is open, all three send you back to the order instead;
+  // the order's own ✕ still closes everything.
+  function dismissModal() {
+    var back = $("#lbTrack") && $("#modalRoot [data-back-to]");
+    if (back) goBackTo(back.getAttribute("data-back-to"));
+    else closeModal();
+  }
+
   function modalHead(title, sub) {
     return (
       '<div class="modal-head"><div><h2>' + title + "</h2>" +
@@ -3072,12 +3090,7 @@
     if (el.hasAttribute("data-add-photo")) { showPhotoUpload(el.getAttribute("data-add-photo")); return; }
     if (el.hasAttribute("data-open-photo")) { showPhotoLightbox(el.getAttribute("data-open-photo")); return; }
     if (el.hasAttribute("data-delete-photo")) { deletePhoto(el.getAttribute("data-delete-photo")); return; }
-    if (el.hasAttribute("data-back-to")) {
-      var bk = el.getAttribute("data-back-to");
-      var bid = bk.slice(bk.indexOf(":") + 1);
-      if (bk.indexOf("order:") === 0) showOrderDetail(bid); else showItemDetail(bid);
-      return;
-    }
+    if (el.hasAttribute("data-back-to")) { goBackTo(el.getAttribute("data-back-to")); return; }
 
     if (el.hasAttribute("data-delete-user")) {
       deleteUser(el.getAttribute("data-delete-user"));
@@ -3106,7 +3119,7 @@
     }
 
     if (el.hasAttribute("data-modal-overlay")) {
-      if (e.target === el) closeModal();
+      if (e.target === el) dismissModal();
       return;
     }
 
@@ -3155,7 +3168,7 @@
 
     var action = el.getAttribute("data-action");
     switch (action) {
-      case "close-modal": closeModal(); break;
+      case "close-modal": dismissModal(); break;
       case "new-order": showOrderForm(null, null); break;
       case "new-client": showClientForm(null); break;
       case "new-client-then-order": showClientForm(null, { thenOrder: true }); break;
@@ -3296,7 +3309,7 @@
   }
 
   document.addEventListener("keydown", function (e) {
-    if (e.key === "Escape") { closeModal(); return; }
+    if (e.key === "Escape") { dismissModal(); return; }
     // arrows walk the photo gallery, but only while it is the thing on screen
     if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && $("#lbTrack")) {
       e.preventDefault();
