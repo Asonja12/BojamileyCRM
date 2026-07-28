@@ -40,18 +40,23 @@
   --surface: #ffffff;
   --surface-2: #f4ece4;
   --ink: #2b2320;
-  --muted: #8a7d72;
+  /* The text colours below are each dark enough to clear WCAG AA (4.5:1) on
+     every surface they actually sit on, checked against the darkest of them.
+     They were a few percent lighter until customers started reading this on
+     phones outdoors. Hue and saturation are unchanged - each was scaled toward
+     black - so the boutique palette still reads the same. */
+  --muted: #73685f;
   --line: #e8ddd2;
   --input-bg: #ffffff;
-  --accent: #f49721;        /* Bojamiley orange */
+  --accent: #f49721;        /* Bojamiley orange, untouched: it carries dark text */
   --accent-hover: #e0870f;
-  --accent-dark: #b96a07;   /* accent for text/emphasis: readable on the page */
+  --accent-dark: #9f5b06;   /* accent for text/emphasis: readable on the page */
   --accent-soft: #fdeedd;
   --on-accent: #442a00;     /* readable text on the orange */
-  --gold: #b98a2f;
-  --green: #3f7d54;
+  --gold: #8e6a24;
+  --green: #3b764f;
   --green-soft: #e4f0e8;
-  --amber: #a06a08;
+  --amber: #956307;
   --amber-soft: #fdf1d8;
   --amber-line: #ecd9a8;
   --amber-ink: #6d4d10;
@@ -59,13 +64,13 @@
   --red-soft: #fbe7e4;
   --red-line: #eecfca;
   --danger-bg: #b23a2f;     /* solid red that always carries white text */
-  --slate: #5f7186;
+  --slate: #5b6c80;
   --slate-soft: #e9eef4;
   --violet: #6d4f96;
   --violet-soft: #ece4f4;
   --blue: #2f6a86;
   --blue-soft: #e2eef4;
-  --sand: #8a6520;
+  --sand: #86621f;
   --sand-soft: #f3e9d9;
   --neutral: #6b645e;
   --neutral-soft: #e8e6e3;
@@ -1120,9 +1125,9 @@ input, select, textarea { font: inherit; color: inherit; }
 .invoice-doc {
   --surface-2: #f4ece4;
   --ink: #241d19;
-  --muted: #8a7d72;
+  --muted: #73685f;
   --line: #e8ddd2;
-  --accent-dark: #b96a07;
+  --accent-dark: #9f5b06;
   --accent-soft: #fdeedd;
 
   background: #fff;

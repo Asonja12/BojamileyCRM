@@ -1753,12 +1753,12 @@
 
     doc.setFont("helvetica", "bold");
     doc.setFontSize(17);
-    doc.setTextColor(185, 106, 7);
+    doc.setTextColor(159, 91, 6);
     doc.text(db.settings.businessName || "Bojamiley", L, y);
 
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9);
-    doc.setTextColor(138, 125, 114);
+    doc.setTextColor(115, 104, 95);
     var by = y + 5;
     [s.businessAddress, s.businessPhone, s.businessEmail].forEach(function (t) {
       if (t) { doc.text(String(t), L, by); by += 4; }
@@ -1766,14 +1766,14 @@
 
     doc.setFont("helvetica", "bold");
     doc.setFontSize(20);
-    doc.setTextColor(185, 106, 7);
+    doc.setTextColor(159, 91, 6);
     doc.text("INVOICE", R, y, { align: "right" });
     doc.setFontSize(10);
     doc.setTextColor(43, 35, 32);
     doc.text(v.number, R, y + 6, { align: "right" });
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9);
-    doc.setTextColor(138, 125, 114);
+    doc.setTextColor(115, 104, 95);
     doc.text(fmtDateShort(v.issueDate), R, y + 11, { align: "right" });
 
     y = Math.max(by, y + 15) + 3;
@@ -1784,7 +1784,7 @@
     y += 8;
 
     doc.setFontSize(8);
-    doc.setTextColor(138, 125, 114);
+    doc.setTextColor(115, 104, 95);
     doc.text("BILLED TO", L, y);
     y += 5;
     doc.setFont("helvetica", "bold");
@@ -1801,7 +1801,7 @@
     // items table
     y += 9;
     doc.setFontSize(8);
-    doc.setTextColor(138, 125, 114);
+    doc.setTextColor(115, 104, 95);
     doc.text("DESCRIPTION", L, y);
     doc.text("QTY", 130, y, { align: "right" });
     doc.text("PRICE", 158, y, { align: "right" });
@@ -1840,7 +1840,7 @@
     if (v.notes) {
       doc.setFont("helvetica", "normal");
       doc.setFontSize(9);
-      doc.setTextColor(138, 125, 114);
+      doc.setTextColor(115, 104, 95);
       var nl = doc.splitTextToSize(String(v.notes), R - L);
       doc.text(nl, L, y);
       y += nl.length * 4.2 + 4;
@@ -1853,7 +1853,7 @@
       var byy = y + 6;
       doc.setFont("helvetica", "bold");
       doc.setFontSize(8);
-      doc.setTextColor(185, 106, 7);
+      doc.setTextColor(159, 91, 6);
       doc.text("PAYMENT DETAILS", L + 4, byy);
       doc.setTextColor(43, 35, 32);
       doc.setFont("helvetica", "normal");
@@ -1871,7 +1871,7 @@
 
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9);
-    doc.setTextColor(138, 125, 114);
+    doc.setTextColor(115, 104, 95);
     doc.text("Thank you for your patronage.", 105, Math.min(y + 2, 285), { align: "center" });
 
     return doc;
@@ -1981,20 +1981,20 @@
     }
 
     // header
-    font(17, true); x.fillStyle = "#b96a07";
+    font(17, true); x.fillStyle = "#9f5b06";
     txt(db.settings.businessName || "Bojamiley", L, y);
 
-    font(9, false); x.fillStyle = "#8a7d72";
+    font(9, false); x.fillStyle = "#73685f";
     var by = y + mm(5);
     [s.businessAddress, s.businessPhone, s.businessEmail].forEach(function (t) {
       if (t) { txt(t, L, by); by += mm(4); }
     });
 
-    font(20, true); x.fillStyle = "#b96a07";
+    font(20, true); x.fillStyle = "#9f5b06";
     txt("INVOICE", R, y, "right");
     font(10, true); x.fillStyle = "#2b2320";
     txt(v.number, R, y + mm(6), "right");
-    font(9, false); x.fillStyle = "#8a7d72";
+    font(9, false); x.fillStyle = "#73685f";
     txt(fmtDateShort(v.issueDate), R, y + mm(11), "right");
 
     y = Math.max(by, y + mm(15)) + mm(3);
@@ -2002,7 +2002,7 @@
     y += mm(8);
 
     // billed to
-    font(8, false); x.fillStyle = "#8a7d72";
+    font(8, false); x.fillStyle = "#73685f";
     txt("BILLED TO", L, y);
     y += mm(5);
     font(12, true); x.fillStyle = "#2b2320";
@@ -2014,7 +2014,7 @@
 
     // items
     y += mm(9);
-    font(8, false); x.fillStyle = "#8a7d72";
+    font(8, false); x.fillStyle = "#73685f";
     txt("DESCRIPTION", L, y);
     txt("QTY", mm(130), y, "right");
     txt("PRICE", mm(158), y, "right");
@@ -2049,7 +2049,7 @@
     y = ty + mm(4);
 
     if (v.notes) {
-      font(9, false); x.fillStyle = "#8a7d72";
+      font(9, false); x.fillStyle = "#73685f";
       var nl = wrap(v.notes, R - L);
       nl.forEach(function (ln, i) { txt(ln, L, y + mm(4.2 * i)); });
       y += mm(4.2) * nl.length + mm(4);
@@ -2060,7 +2060,7 @@
       x.fillStyle = "#fdeedd";
       roundRect(L, y, R - L, boxH, mm(2));
       var byy = y + mm(6);
-      font(8, true); x.fillStyle = "#b96a07";
+      font(8, true); x.fillStyle = "#9f5b06";
       txt("PAYMENT DETAILS", L + mm(4), byy);
       x.fillStyle = "#2b2320";
       font(10, false);
@@ -2074,7 +2074,7 @@
       y += boxH + mm(6);
     }
 
-    font(9, false); x.fillStyle = "#8a7d72";
+    font(9, false); x.fillStyle = "#73685f";
     txt("Thank you for your patronage.", IMG_W / 2, y + mm(2), "center");
     y += mm(8);
 
