@@ -1265,6 +1265,7 @@ input, select, textarea { font: inherit; color: inherit; }
 .role-staff   { background: var(--slate-soft); color: var(--slate); }
 .role-viewer  { background: var(--surface-2); color: var(--muted); }
 .role-pending { background: var(--amber-soft); color: var(--amber); }
+.role-client  { background: var(--violet-soft); color: var(--violet); }
 
 /* someone is waiting to be approved */
 .menu-badge {
