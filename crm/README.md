@@ -117,10 +117,16 @@ Internet is required since data lives in the cloud.
   their own measurements. They see nothing else: not other clients, not stock,
   not the studio's screens.
   - Signing up, they pick *I'm a client*. Nothing is visible to them until an
-    Admin connects the sign-in to a client record in Menu → 🔗 Client sign-ups,
-    either an existing client or a new one. **Connecting is deliberate, not
-    automatic** — matching on a phone number would let anyone who knows it claim
-    someone else's measurements and order history.
+    Admin connects the sign-in to a client record, either an existing client or
+    a new one. New sign-ups wait at the top of the **Dashboard** under *New
+    client sign-ups*, and that section disappears once none are waiting.
+    **Connecting is deliberate, not automatic** — matching on a phone number
+    would let anyone who knows it claim someone else's measurements and order
+    history.
+  - Clients who have a sign-in are marked quietly with an **Account** tag in the
+    Clients list. There is no list of accounts anywhere: once connected there is
+    nothing to do about it, so it shows on her own record, where her sign-in
+    address and a *Disconnect* button also live.
   - Measurements they send in **do not overwrite** what the studio has on file.
     They wait on the client's page as *"sent in measurements"* with the changes
     listed, for someone to Accept or Discard. A number mistyped at home should

@@ -16,7 +16,7 @@
   // Shown at the bottom of the Menu and of a client's Account tab. When
   // something looks like it did not ship, this says whether the phone is
   // actually running the new copy. Keep it in step with the ?v= in index.html.
-  var APP_VERSION = "20260728a";
+  var APP_VERSION = "20260728b";
 
   /* ---------- Domain constants ---------- */
 
@@ -902,7 +902,7 @@
     // unmissable badge when people are waiting to be let in, or a client has
     // signed up and is still waiting to be connected to her records
     var waiting = isAdmin()
-      ? db.profiles.filter(function (p) { return p.role === "pending"; }).length + unlinkedCustomers().length
+      ? db.profiles.filter(function (p) { return p.role === "pending"; }).length
       : 0;
     $("#menuBtn").innerHTML = "&#9881; Menu" +
       (waiting ? ' <span class="menu-badge">' + waiting + "</span>" : "");
@@ -2621,7 +2621,7 @@
         esc(me.fullName || me.email) + '</strong> <span class="role-badge role-' + esc(me.role) + '">' + roleLabel + "</span></p>";
     }
 
-    html += requestQueueBlock();
+    html += clientSignupQueueBlock() + requestQueueBlock();
 
     if (db.clients.length === 0 && db.orders.length === 0) {
       html +=
@@ -2876,6 +2876,9 @@
           '<div class="card-sub">' + (c.phone ? esc(c.phone) + " · " : "") + orders.length + " order" + (orders.length === 1 ? "" : "s") +
           (open.length ? " · <strong>" + open.length + " active</strong>" : "") + "</div></div>" +
           '<div class="card-badges">' +
+            // quiet marker: she signed up and follows her own orders. Nothing
+            // to act on, so it stays out of the way of the money.
+            (c.userId ? '<span class="tag-account" title="Signed up herself and can follow her orders">Account</span>' : "") +
             (owed > 0 ? '<span class="balance-chip balance-owed">Owes ' + money(owed) + "</span>" : "") +
           "</div>" +
         "</div>" +
@@ -3075,6 +3078,7 @@
           : '<p style="color:var(--muted);font-size:13px;margin:6px 0 10px">🔒 Contact details are visible to the Admin only.</p>') +
         (isAdmin() && c.address ? '<div class="detail-item"><div class="dt">Address</div><div class="dd">' + esc(c.address) + "</div></div>" : "") +
         (c.notes ? '<div class="detail-item" style="margin-top:8px"><div class="dt">Style notes</div><div class="dd">' + esc(c.notes) + "</div></div>" : "") +
+        clientAccountLine(c) +
         measurementReviewBlock(c) +
         '<h3 class="section-title">📏 Size &amp; Measurements</h3>' +
         (m.size ? '<div class="size-badge">Size <strong>' + esc(m.size) + "</strong></div>" : "") +
@@ -3522,8 +3526,6 @@
 
         pendingBlock +
 
-        clientAccountsBlock() +
-
         themeToggle() +
 
         '<h3 class="section-title">👥 Team</h3>' +
@@ -3576,55 +3578,78 @@
     return found;
   }
 
-  // Clients with a sign-in, kept well away from the Team list: they are not
-  // staff, and the studio roles do not apply to them.
-  function clientAccountsBlock() {
+  // Only the sign-ups still waiting on someone, and only while there are any.
+  // Connected accounts are not listed anywhere as a group: there could be
+  // hundreds of them and none of them need anything doing, so each one shows on
+  // her own client instead. This lives on the Dashboard rather than the Menu
+  // because a person is sitting there seeing nothing until it is dealt with.
+  function clientSignupQueueBlock() {
     if (!isAdmin()) return "";
-    var accounts = db.profiles.filter(function (p) { return p.role === "customer"; });
-    if (!accounts.length) return "";
     var waiting = unlinkedCustomers();
+    if (!waiting.length) return "";
     var free = db.clients.filter(function (c) { return !c.userId; });
 
-    var rows = accounts.map(function (p) {
-      var linked = linkedClientFor(p.id);
-      if (linked) {
+    return (
+      '<h3 class="section-title">👗 New client sign-ups (' + waiting.length + ")</h3>" +
+      '<p class="hint" style="margin-bottom:8px">She can see nothing until you connect her. ' +
+      "Connecting shows her that client's orders, measurements and balances, so only connect someone you recognise. " +
+      "If she is new to the studio, choose <em>Create a new client</em>.</p>" +
+      waiting.map(function (p) {
         return (
-          '<div class="team-row">' +
-            '<div><div class="t-name">' + esc(p.fullName || "(no name)") + "</div>" +
-            '<div class="t-email">' + esc(p.email) + " · sees " + esc(linked.name) + "</div></div>" +
-            '<div style="display:flex;align-items:center;gap:6px">' +
-              '<span class="role-badge role-client">Client</span>' +
-              '<button class="btn btn-ghost btn-sm" data-delete-user="' + p.id + '" title="Remove this sign-in">✕</button>' +
+          '<div class="pending-row">' +
+            '<div class="t-name">' + esc(p.fullName || "(no name)") + "</div>" +
+            '<div class="t-email">' + esc(p.email) + "</div>" +
+            '<div class="pending-actions">' +
+              '<select data-link-to="' + p.id + '">' +
+                '<option value="__new__">Create a new client</option>' +
+                free.map(function (c) {
+                  return '<option value="' + c.id + '">' + esc(c.name) + "</option>";
+                }).join("") +
+              "</select>" +
+              '<button class="btn btn-primary btn-sm" data-link-customer="' + p.id + '">Connect</button>' +
+              '<button class="btn btn-danger btn-sm" data-delete-user="' + p.id + '">Reject</button>' +
             "</div>" +
           "</div>"
         );
-      }
-      return (
-        '<div class="pending-row">' +
-          '<div class="t-name">' + esc(p.fullName || "(no name)") + "</div>" +
-          '<div class="t-email">' + esc(p.email) + "</div>" +
-          '<div class="pending-actions">' +
-            '<select data-link-to="' + p.id + '">' +
-              '<option value="__new__">Create a new client</option>' +
-              free.map(function (c) {
-                return '<option value="' + c.id + '">' + esc(c.name) + "</option>";
-              }).join("") +
-            "</select>" +
-            '<button class="btn btn-primary btn-sm" data-link-customer="' + p.id + '">Connect</button>' +
-            '<button class="btn btn-danger btn-sm" data-delete-user="' + p.id + '">Reject</button>' +
-          "</div>" +
-        "</div>"
-      );
-    }).join("");
-
-    return (
-      '<h3 class="section-title">👗 Client accounts (' + accounts.length + ")</h3>" +
-      '<p class="hint" style="margin-bottom:8px">' +
-      (waiting.length
-        ? waiting.length + " waiting to be connected. Connecting shows her that client's orders, measurements and balances, so only connect people you recognise."
-        : "Clients who sign in to follow their own orders. They see nothing else in the studio.") +
-      "</p>" + rows
+      }).join("")
     );
+  }
+
+  function profileFor(userId) {
+    var found = null;
+    db.profiles.forEach(function (p) { if (p.id === userId) found = p; });
+    return found;
+  }
+
+  // Shown on her own client rather than in a list of accounts.
+  function clientAccountLine(c) {
+    if (!isAdmin() || !c.userId) return "";
+    var p = profileFor(c.userId);
+    return (
+      '<div class="detail-item" style="margin-top:10px">' +
+        '<div class="dt">Client sign-in</div>' +
+        '<div class="dd" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">' +
+          "<span>" + esc(p ? p.email : "connected") + "</span>" +
+          '<button class="btn btn-ghost btn-sm" data-disconnect-client="' + c.id + '">Disconnect</button>' +
+        "</div>" +
+      "</div>"
+    );
+  }
+
+  function disconnectClient(id) {
+    if (!isAdmin()) return;
+    var c = clientById(id);
+    if (!c || !c.userId) return;
+    if (!confirm("Disconnect " + c.name + "'s sign-in? She keeps her account but will stop seeing her orders until you connect her again.")) return;
+    sb.from("clients").update({ user_id: null }).eq("id", id).select(CLIENT_COLS).single().then(function (res) {
+      if (res.error) return fail(res.error, "Could not disconnect that sign-in");
+      var saved = rowToClient(res.data);
+      saved.phone = c.phone; saved.email = c.email; saved.address = c.address;
+      db.clients = db.clients.map(function (x) { return x.id === saved.id ? saved : x; });
+      toast("Disconnected");
+      renderAll();
+      showClientDetail(id);
+    });
   }
 
   function linkCustomer(userId) {
@@ -3768,7 +3793,7 @@
   document.addEventListener("click", function (e) {
     var t = e.target;
 
-    var el = t.closest("[data-tab],[data-action],[data-order-filter],[data-open-order],[data-open-client],[data-advance-order],[data-edit-client],[data-delete-client],[data-new-order-for],[data-edit-order],[data-delete-order],[data-set-status],[data-del-payment],[data-print-order],[data-modal-overlay],[data-an-shift],[data-delete-user],[data-inv-cat],[data-open-item],[data-edit-item],[data-delete-item],[data-stock-in],[data-stock-out],[data-add-photo],[data-open-photo],[data-delete-photo],[data-back-to],[data-open-invoice],[data-invoice-order],[data-invoice-client],[data-pick-invoice-client],[data-add-line],[data-del-line],[data-delete-invoice],[data-invoice-paid],[data-invoice-unpaid],[data-download-invoice],[data-approve-user],[data-theme-set],[data-share-image],[data-image-invoice],[data-lb-step],[data-ctab],[data-ctab-go],[data-open-my-order],[data-signup-as],[data-link-customer],[data-accept-measurements],[data-discard-measurements],[data-approve-request],[data-decline-request]");
+    var el = t.closest("[data-tab],[data-action],[data-order-filter],[data-open-order],[data-open-client],[data-advance-order],[data-edit-client],[data-delete-client],[data-new-order-for],[data-edit-order],[data-delete-order],[data-set-status],[data-del-payment],[data-print-order],[data-modal-overlay],[data-an-shift],[data-delete-user],[data-inv-cat],[data-open-item],[data-edit-item],[data-delete-item],[data-stock-in],[data-stock-out],[data-add-photo],[data-open-photo],[data-delete-photo],[data-back-to],[data-open-invoice],[data-invoice-order],[data-invoice-client],[data-pick-invoice-client],[data-add-line],[data-del-line],[data-delete-invoice],[data-invoice-paid],[data-invoice-unpaid],[data-download-invoice],[data-approve-user],[data-theme-set],[data-share-image],[data-image-invoice],[data-lb-step],[data-ctab],[data-ctab-go],[data-open-my-order],[data-signup-as],[data-link-customer],[data-accept-measurements],[data-discard-measurements],[data-approve-request],[data-decline-request],[data-disconnect-client]");
     if (!el) return;
 
     if (el.hasAttribute("data-theme-set")) { setTheme(el.getAttribute("data-theme-set")); return; }
@@ -3817,6 +3842,7 @@
     if (el.hasAttribute("data-approve-request")) { e.stopPropagation(); approveRequest(el.getAttribute("data-approve-request")); return; }
     if (el.hasAttribute("data-decline-request")) { e.stopPropagation(); declineRequest(el.getAttribute("data-decline-request")); return; }
     if (el.hasAttribute("data-link-customer")) { linkCustomer(el.getAttribute("data-link-customer")); return; }
+    if (el.hasAttribute("data-disconnect-client")) { disconnectClient(el.getAttribute("data-disconnect-client")); return; }
     if (el.hasAttribute("data-accept-measurements")) { reviewMeasurements(el.getAttribute("data-accept-measurements"), true); return; }
     if (el.hasAttribute("data-discard-measurements")) { reviewMeasurements(el.getAttribute("data-discard-measurements"), false); return; }
     if (el.hasAttribute("data-add-photo")) { showPhotoUpload(el.getAttribute("data-add-photo")); return; }
