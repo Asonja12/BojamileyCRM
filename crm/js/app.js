@@ -16,7 +16,7 @@
   // Shown at the bottom of the Menu and of a client's Account tab. When
   // something looks like it did not ship, this says whether the phone is
   // actually running the new copy. Keep it in step with the ?v= in index.html.
-  var APP_VERSION = "20260728d";
+  var APP_VERSION = "20260728e";
 
   /* ---------- Domain constants ---------- */
 
@@ -624,7 +624,9 @@
 
     var orders = db.orders.slice();
     var open = orders.filter(isOpen);
-    var done = orders.filter(function (o) { return !isOpen(o); });
+    // "not open" also catches an order she has only just asked for, which has
+    // its own section above and is certainly not finished
+    var done = orders.filter(function (o) { return !isOpen(o) && !isRequest(o); });
     var owed = orders.reduce(function (t, o) { return t + Math.max(0, balanceOf(o)); }, 0);
     var first = (c.name || "").split(" ")[0];
 
@@ -975,7 +977,8 @@
     // unmissable badge when people are waiting to be let in, or a client has
     // signed up and is still waiting to be connected to her records
     var waiting = isAdmin()
-      ? db.profiles.filter(function (p) { return p.role === "pending"; }).length + unlinkedCustomers().length
+      ? db.profiles.filter(function (p) { return p.role === "pending"; }).length +
+        unlinkedCustomers().length + pendingRequests().length
       : 0;
     $("#menuBtn").innerHTML = "&#9881; Menu" +
       (waiting ? ' <span class="menu-badge">' + waiting + "</span>" : "");
@@ -2700,7 +2703,6 @@
         esc(me.fullName || me.email) + '</strong> <span class="role-badge role-' + esc(me.role) + '">' + roleLabel + "</span></p>";
     }
 
-    html += requestQueueBlock();
 
     if (db.clients.length === 0 && db.orders.length === 0) {
       html +=
@@ -2756,14 +2758,16 @@
     var list = pendingRequests();
     if (!list.length) return "";
     return (
-      '<h3 class="section-title">✂ Requests from clients (' + list.length + ")</h3>" +
+      '<h3 class="section-title">Orders from clients (' + list.length + ")</h3>" +
       '<p class="hint" style="margin-bottom:8px">' +
       (isAdmin()
-        ? "Accepting gives the piece a real order number and puts it in the workroom. Agree the price and dates with her first."
+        ? "Accepting gives the piece a real order number and puts it in the workroom. You enter the agreed price as you accept."
         : "Only the Admin can accept these.") + "</p>" +
       '<div class="card-list">' + list.map(function (o) {
         return (
-          '<div class="item-card" data-open-order="' + o.id + '">' +
+          // not a click target: this sits inside the Menu now, and opening the
+          // order from here would replace the very list being worked through
+          '<div class="item-card" style="cursor:default">' +
             '<div class="card-top"><div class="card-title">' + esc(o.garment || "A piece") +
               '<span class="ref" style="margin-left:6px">' + esc(o.ref) + "</span></div>" +
               '<div class="card-badges"><span class="pill st-requested">Awaiting approval</span></div></div>' +
@@ -2783,17 +2787,51 @@
     );
   }
 
+  // Accepting is where the price gets agreed, so it is asked for here rather
+  // than left at zero for someone to notice later.
   function approveRequest(id) {
     if (!isAdmin()) return;
     var o = orderById(id);
     if (!o || !isRequest(o)) return;
-    if (!confirm("Accept " + clientName(o.clientId) + "'s request for " + (o.garment || "this piece") +
-                 "? It becomes a real order and she will see it move through the workroom.")) return;
-    sb.rpc("approve_order", { p_order: id }).then(function (res) {
-      if (res.error) return fail(res.error, "Could not accept that request");
-      toast("Accepted ✓ " + res.data);
-      loadAll().then(function () { renderAll(); showOrderDetail(id); });
-    });
+    openModal(
+      modalHead("Accept this order", esc(clientName(o.clientId)) + " · " + esc(o.garment || "a piece")) +
+      '<div class="modal-body"><form id="acceptForm" data-order-id="' + o.id + '">' +
+        (o.description ? '<div class="detail-item" style="margin-bottom:12px"><div class="dt">What she asked for</div>' +
+          '<div class="dd">' + esc(o.description) + "</div></div>" : "") +
+        '<div class="form-grid">' +
+          '<div class="field"><label for="ac_price">Price *</label>' +
+            '<input id="ac_price" type="number" min="0" step="any" inputmode="decimal" required ' +
+            'placeholder="0" autofocus></div>' +
+          '<div class="field"><label for="ac_due">Due date</label>' +
+            '<input id="ac_due" type="date" value="' + esc(o.dueDate || "") + '"></div>' +
+        "</div>" +
+        '<div class="hint" style="margin-top:8px">She asked for it ' +
+          (o.dueDate ? "by " + esc(fmtDate(o.dueDate)) : "with no date in mind") +
+          ". Agree the price with her first — she sees it as soon as you accept.</div>" +
+        '<div class="modal-actions"><span class="spacer"></span>' +
+          '<button type="button" class="btn btn-ghost" data-action="close-modal">Cancel</button>' +
+          '<button type="submit" class="btn btn-primary">Accept order</button>' +
+        "</div>" +
+      "</form></div>"
+    );
+  }
+
+  function submitAccept(form) {
+    if (!isAdmin()) return;
+    var id = form.getAttribute("data-order-id");
+    var raw = $("#ac_price").value.trim();
+    if (raw === "") { toast("Enter the agreed price first", true); return; }
+    var price = Number(raw);
+    if (!(price >= 0)) { toast("That price does not look right", true); return; }
+    busy("#acceptForm", true);
+    sb.rpc("approve_order", { p_order: id, p_price: price, p_due: $("#ac_due").value || null })
+      .then(function (res) {
+        busy("#acceptForm", false);
+        if (res.error) return fail(res.error, "Could not accept that order");
+        closeModal();
+        toast("Accepted ✓ " + res.data);
+        loadAll().then(function () { renderAll(); showOrderDetail(id); });
+      });
   }
 
   function declineRequest(id) {
@@ -3607,6 +3645,8 @@
 
         clientSignupQueueBlock() +
 
+        requestQueueBlock() +
+
         themeToggle() +
 
         '<h3 class="section-title">👥 Team</h3>' +
@@ -4121,6 +4161,7 @@
     else if (form.id === "settingsForm") { e.preventDefault(); saveSettings(); }
     else if (form.id === "myMeasureForm") { e.preventDefault(); submitMyMeasurements(); }
     else if (form.id === "requestForm") { e.preventDefault(); submitRequest(); }
+    else if (form.id === "acceptForm") { e.preventDefault(); submitAccept(form); }
     else if (form.id === "paymentForm") {
       e.preventDefault();
       if (!isAdmin()) return;
