@@ -1268,6 +1268,18 @@ input, select, textarea { font: inherit; color: inherit; }
 .role-pending { background: var(--amber-soft); color: var(--amber); }
 .role-client  { background: var(--violet-soft); color: var(--violet); }
 
+/* A client who signed up and follows her own orders. Deliberately quiet: there
+   is nothing to do about it, it just needs to be knowable at a glance. */
+.tag-account {
+  background: var(--violet-soft);
+  color: var(--violet);
+  border-radius: 999px;
+  padding: 2px 9px;
+  font-size: 11.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
 /* someone is waiting to be approved */
 .menu-badge {
   display: inline-block;
