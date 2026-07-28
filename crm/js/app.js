@@ -16,7 +16,7 @@
   // Shown at the bottom of the Menu and of a client's Account tab. When
   // something looks like it did not ship, this says whether the phone is
   // actually running the new copy. Keep it in step with the ?v= in index.html.
-  var APP_VERSION = "20260728e";
+  var APP_VERSION = "20260728f";
 
   /* ---------- Domain constants ---------- */
 
@@ -638,7 +638,12 @@
         "<p>" + (open.length
           ? open.length + (open.length === 1 ? " piece is" : " pieces are") + " being made for you."
           : "Nothing in the workroom right now.") + "</p>" +
-        '<button class="btn c-hero-cta" data-action="request-piece">Place an order</button>' +
+        // Nothing can be cut without her measurements, so the order button only
+        // appears once they are in. Until then the prompt below is the one
+        // thing to do, rather than one of two competing choices.
+        (measurementsFilled(c)
+          ? '<button class="btn c-hero-cta" data-action="request-piece">Place an order</button>'
+          : "") +
       "</div>";
 
     if (waiting.length) {
@@ -655,8 +660,9 @@
       html +=
         '<div class="c-prompt">' +
           '<div class="c-prompt-body">' +
-            "<h4>Add your measurements</h4>" +
-            "<p>So the studio can cut to your exact size. A standard size on its own is enough to start with.</p>" +
+            "<h4>Add your measurements first</h4>" +
+            "<p>Nothing can be cut without them, so they are needed before you can place an order. " +
+            "A standard size on its own is enough to start with.</p>" +
             '<button class="btn btn-primary btn-sm" data-ctab-go="measurements">Add my measurements</button>' +
           "</div>" +
         "</div>";
@@ -677,8 +683,10 @@
 
     if (!orders.length) {
       html += '<div class="empty"><span class="empty-icon">🧵</span><h3>Nothing here yet</h3>' +
-        "<p>Place an order and you can follow it here from cutting through to collection, with photos as it comes together.</p>" +
-        '<button class="btn btn-primary" data-action="request-piece">Place an order</button></div>';
+        "<p>Once you place an order you can follow it here from cutting through to collection, with photos as it comes together.</p>" +
+        (measurementsFilled(c)
+          ? '<button class="btn btn-primary" data-action="request-piece">Place an order</button>'
+          : "") + "</div>";
     }
 
     view.innerHTML = html;
@@ -687,7 +695,14 @@
   /* ---------- Asking the studio for a piece ---------- */
 
   function showRequestForm() {
-    if (!isCustomer() || !myClient()) return;
+    var mine = myClient();
+    if (!isCustomer() || !mine) return;
+    // the button is hidden without them, but the rule belongs here too
+    if (!measurementsFilled(mine)) {
+      toast("Please add your measurements first — the studio needs them to cut", true);
+      switchCustomerTab("measurements");
+      return;
+    }
     openModal(
       modalHead("Place an order", "The studio will confirm the price and dates with you before starting.") +
       '<div class="modal-body"><form id="requestForm">' +
@@ -860,8 +875,10 @@
 
   /* ---------- Her measurements ---------- */
 
+  // Counts what she has sent in as well as what the studio has confirmed.
+  // Waiting on the studio to check them is not her holding anything up.
   function measurementsFilled(c) {
-    var m = (c && c.measurements) || {};
+    var m = (c && (c.pendingMeasurements || c.measurements)) || {};
     if (m.size) return true;
     for (var i = 0; i < MEASUREMENTS.length; i++) if (m[MEASUREMENTS[i][0]]) return true;
     return false;
@@ -2838,14 +2855,18 @@
     if (!isAdmin()) return;
     var o = orderById(id);
     if (!o || !isRequest(o)) return;
-    if (!confirm("Decline this request? She will see it marked as declined. Let her know why yourself.")) return;
+    if (!confirm("Decline " + clientName(o.clientId) + "'s order for " + (o.garment || "this piece") +
+                 "? She will see it marked as declined. Let her know why yourself.")) return;
     sb.from("orders").update({ status: "cancelled" }).eq("id", id).select(ORDER_COLS).single().then(function (res) {
       if (res.error) return fail(res.error, "Could not decline that request");
       var saved = rowToOrder(res.data);
       saved.price = o.price; saved.payments = o.payments;
       db.orders = db.orders.map(function (x) { return x.id === saved.id ? saved : x; });
-      toast("Request declined");
+      toast("Order declined");
       renderAll();
+      // the list is inside the Menu, and renderAll does not touch what is in a
+      // modal, so it sat there declined until the Menu was closed and reopened
+      if ($("#modalRoot .modal-card")) showSettings();
     });
   }
 
@@ -3229,18 +3250,31 @@
     var c = clientById(id);
     if (!c) return;
     var n = ordersForClient(id).length;
-    var msg = n
-      ? "Delete client “" + c.name + "” AND her " + n + " order(s)? This cannot be undone."
-      : "Delete client “" + c.name + "”? This cannot be undone.";
+    var acct = c.userId ? profileFor(c.userId) : null;
+    var msg = "Delete client “" + c.name + "”" +
+      (n ? ", her " + n + " order" + (n === 1 ? "" : "s") : "") +
+      (acct ? " and her sign-in (" + (acct.email || "her account") + ")" : "") +
+      "? This cannot be undone.";
     if (!confirm(msg)) return;
+
     sb.from("clients").delete().eq("id", id).then(function (res) {
-      if (res.error) return fail(res.error, "Could not delete");
+      if (res.error) throw res.error;
+      // Her sign-in has to go with her. Left behind it belongs to nobody, so
+      // she reappears in the sign-up queue as though she had just registered,
+      // and is met with the welcome screen on her own phone.
+      return c.userId ? sb.rpc("admin_delete_user", { target: c.userId }) : null;
+    }).then(function (res) {
       db.clients = db.clients.filter(function (x) { return x.id !== id; });
       db.orders = db.orders.filter(function (o) { return o.clientId !== id; });
+      if (c.userId) db.profiles = db.profiles.filter(function (p) { return p.id !== c.userId; });
       renderAll();
       closeModal();
-      toast("Client deleted");
-    });
+      if (res && res.error) {
+        fail(res.error, "Client deleted, but her sign-in could not be removed");
+      } else {
+        toast(acct ? "Client and her sign-in deleted" : "Client deleted");
+      }
+    }).catch(function (e) { fail(e, "Could not delete"); });
   }
 
   /* ---------- Order form ---------- */

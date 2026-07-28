@@ -559,8 +559,27 @@ input, select, textarea { font: inherit; color: inherit; }
 
 .field input, .field select { min-width: 0; max-width: 100%; }
 
-/* belt and braces for the one that causes it */
-input[type="date"] { min-width: 0; max-width: 100%; }
+/* And this is why it kept coming back. On iOS Safari a date control keeps a
+   native appearance that sizes itself to its own content and simply ignores
+   width:100%, so the field rendered wider than the form however the container
+   behaved. Dropping the native appearance makes it obey its box like every
+   other input; the two rules under it put back the height and the left
+   alignment that dropping it takes away. */
+input[type="date"],
+input[type="datetime-local"],
+input[type="month"],
+input[type="time"] {
+  -webkit-appearance: none;
+  appearance: none;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  min-height: 40px;   /* without its native furniture the control collapses */
+}
+
+/* iOS centres the value and adds padding of its own inside the control */
+input[type="date"]::-webkit-date-and-time-value { text-align: left; margin: 0; }
+input[type="date"]::-webkit-datetime-edit { padding: 0; }
 
 .field label {
   display: block;
