@@ -111,6 +111,23 @@ Internet is required since data lives in the cloud.
   table, so staff never see them. Amounts print as `NGN 35,000` in the PDF because
   the PDF fonts have no ₦ glyph.
 - **Team:** the Admin manages who has what access from the Menu.
+- **Client portal:** clients can have their own sign-in. They see a different
+  app entirely — their orders as a stage-by-stage journey with the photos as the
+  piece comes together, what they have paid and still owe, and a form to send in
+  their own measurements. They see nothing else: not other clients, not stock,
+  not the studio's screens.
+  - Signing up, they pick *I'm a client*. Nothing is visible to them until an
+    Admin connects the sign-in to a client record in Menu → 🔗 Client sign-ups,
+    either an existing client or a new one. **Connecting is deliberate, not
+    automatic** — matching on a phone number would let anyone who knows it claim
+    someone else's measurements and order history.
+  - Measurements they send in **do not overwrite** what the studio has on file.
+    They wait on the client's page as *"sent in measurements"* with the changes
+    listed, for someone to Accept or Discard. A number mistyped at home should
+    never reach the cutting table on its own.
+  - The database enforces all of this, not the app: a client account is served
+    exactly one client record and its orders, so there is nothing to see even
+    outside the app.
 - **Dark mode:** Menu → 🌒 Appearance, with Light, Dark and System. System follows
   the phone's or computer's own setting and switches over live when it changes
   (for example at sunset on a phone set to automatic). The choice is saved on that
