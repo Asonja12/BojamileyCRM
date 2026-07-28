@@ -141,6 +141,14 @@ Internet is required since data lives in the cloud.
   - Requests are numbered **REQ-001…** and only take a real **ORD-** number when
     accepted, so declining one never leaves a hole in the studio's order
     numbering.
+  - She can attach **a picture** when placing the order — something she has seen
+    and liked, or her fabric. It is shrunk like any other photo, filed against
+    the order as a style reference, and is on the job card the tailor works
+    from, so there is less to describe in words.
+  - **Invoices raised against her appear on her own screen**, with what is left
+    to pay and the studio's bank details, and she can download the PDF or the
+    picture herself. Staff still see no invoices and no bank details at all —
+    they have no reason to; a client who cannot see where to pay does.
   - The database enforces all of this, not the app: a client account is served
     exactly one client record and its orders, so there is nothing to see even
     outside the app. She has no insert or update rights on any table — asking
