@@ -125,9 +125,21 @@ Internet is required since data lives in the cloud.
     They wait on the client's page as *"sent in measurements"* with the changes
     listed, for someone to Accept or Discard. A number mistyped at home should
     never reach the cutting table on its own.
+  - **Clients can ask for a piece.** *Request a piece* on her home screen sends
+    the studio what she wants made, the fabric, and when she is hoping for it.
+    It arrives at the top of the Dashboard under *Requests from clients*, where
+    the **Admin** accepts or declines it — staff cannot. Nothing is committed
+    until then: a request sets no price and does not count as work, so it never
+    inflates the active total or turns up as overdue against a date the studio
+    never agreed to.
+  - Requests are numbered **REQ-001…** and only take a real **ORD-** number when
+    accepted, so declining one never leaves a hole in the studio's order
+    numbering.
   - The database enforces all of this, not the app: a client account is served
     exactly one client record and its orders, so there is nothing to see even
-    outside the app.
+    outside the app. She has no insert or update rights on any table — asking
+    for a piece and sending measurements each go through a single narrow
+    function that fixes the client, the status and the price itself.
 - **Dark mode:** Menu → 🌒 Appearance, with Light, Dark and System. System follows
   the phone's or computer's own setting and switches over live when it changes
   (for example at sunset on a phone set to automatic). The choice is saved on that

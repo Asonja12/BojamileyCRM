@@ -25,6 +25,9 @@
     { key: "delivered",   label: "Delivered",        progress: 100 }
   ];
   var CANCELLED = { key: "cancelled", label: "Cancelled", progress: 0 };
+  // A piece a client has asked for that the studio has not taken on yet. Kept
+  // out of STATUSES so it never appears as a stage in the pipeline.
+  var REQUESTED = { key: "requested", label: "Awaiting approval", progress: 0 };
 
   var GARMENTS = [
     "Gown", "Dress", "Wedding Dress", "Aso-Ebi", "Skirt & Blouse", "Blouse",
@@ -147,6 +150,7 @@
 
   function statusOf(order) {
     if (order.status === "cancelled") return CANCELLED;
+    if (order.status === "requested") return REQUESTED;
     for (var i = 0; i < STATUSES.length; i++) {
       if (STATUSES[i].key === order.status) return STATUSES[i];
     }
@@ -158,9 +162,16 @@
     return -1;
   }
 
+  // Work in the studio. A request is not work yet - counting it would inflate
+  // the active total and put a date the studio never agreed to into "overdue".
   function isOpen(order) {
-    return order.status !== "delivered" && order.status !== "cancelled";
+    return order.status !== "delivered" && order.status !== "cancelled" &&
+           order.status !== "requested";
   }
+
+  function isRequest(order) { return order.status === "requested"; }
+
+  function pendingRequests() { return db.orders.filter(isRequest); }
 
   function paidTotal(order) {
     return (order.payments || []).reduce(function (s, p) { return s + Number(p.amount || 0); }, 0);
@@ -607,13 +618,22 @@
     var owed = orders.reduce(function (t, o) { return t + Math.max(0, balanceOf(o)); }, 0);
     var first = (c.name || "").split(" ")[0];
 
+    var waiting = orders.filter(isRequest);
+
     var html =
       '<div class="c-hero">' +
         "<h2>Hello " + esc(first) + "</h2>" +
         "<p>" + (open.length
           ? open.length + (open.length === 1 ? " piece is" : " pieces are") + " being made for you."
           : "Nothing in the workroom right now.") + "</p>" +
+        '<button class="btn" data-action="request-piece">✂ Request a piece</button>' +
       "</div>";
+
+    if (waiting.length) {
+      html += '<h3 class="section-title">Waiting for the studio</h3>' +
+        '<p class="hint" style="margin-bottom:8px">The studio will confirm the price and dates with you before starting.</p>' +
+        '<div class="card-list">' + waiting.map(customerOrderCard).join("") + "</div>";
+    }
 
     if (owed > 0) {
       html += '<div class="c-balance"><span>Outstanding balance</span><strong>' + money(owed) + "</strong></div>";
@@ -634,11 +654,64 @@
     }
 
     if (!orders.length) {
-      html += '<div class="empty"><span class="empty-icon">🧵</span><h3>No orders yet</h3>' +
-        "<p>When the studio starts a piece for you it will show up here, with photos as it comes together.</p></div>";
+      html += '<div class="empty"><span class="empty-icon">🧵</span><h3>Nothing here yet</h3>' +
+        "<p>Ask the studio for a piece and you can follow it here from cutting through to collection, with photos as it comes together.</p>" +
+        '<button class="btn btn-primary" data-action="request-piece">✂ Request a piece</button></div>';
     }
 
     view.innerHTML = html;
+  }
+
+  /* ---------- Asking the studio for a piece ---------- */
+
+  function showRequestForm() {
+    if (!isCustomer() || !myClient()) return;
+    openModal(
+      modalHead("Request a piece", "The studio will confirm the price and dates with you before starting.") +
+      '<div class="modal-body"><form id="requestForm">' +
+        '<div class="field"><label for="rq_garment">What would you like made? *</label>' +
+          '<input id="rq_garment" list="garmentList" required maxlength="80" placeholder="e.g. Aso-Ebi Gown">' +
+          '<datalist id="garmentList">' + GARMENTS.map(function (g) {
+            return '<option value="' + esc(g) + '">';
+          }).join("") + "</datalist></div>" +
+        '<div class="field" style="margin-top:10px"><label for="rq_desc">Tell them about it</label>' +
+          '<textarea id="rq_desc" maxlength="1000" placeholder="Neckline, sleeves, length, the occasion, anything you have seen and liked…"></textarea></div>' +
+        '<div class="form-grid" style="margin-top:10px">' +
+          '<div class="field"><label for="rq_fabric">Fabric, if you know</label>' +
+            '<input id="rq_fabric" maxlength="120" placeholder="e.g. French lace"></div>' +
+          '<div class="field"><label for="rq_fabricby">Who provides it?</label><select id="rq_fabricby">' +
+            '<option value="client">I will bring it</option>' +
+            '<option value="studio">The studio</option>' +
+          "</select></div>" +
+          '<div class="field"><label for="rq_due">Needed by</label>' +
+            '<input id="rq_due" type="date" min="' + todayISO() + '"></div>' +
+        "</div>" +
+        '<div class="hint" style="margin-top:8px">Nothing is confirmed until the studio accepts it, and no price is set yet.</div>' +
+        '<div class="modal-actions"><span class="spacer"></span>' +
+          '<button type="button" class="btn btn-ghost" data-action="close-modal">Cancel</button>' +
+          '<button type="submit" class="btn btn-primary">Send request</button>' +
+        "</div>" +
+      "</form></div>"
+    );
+  }
+
+  function submitRequest() {
+    var garment = $("#rq_garment").value.trim();
+    if (!garment) { toast("Please say what you would like made", true); return; }
+    busy("#requestForm", true);
+    sb.rpc("request_order", {
+      p_garment: garment,
+      p_description: $("#rq_desc").value.trim(),
+      p_fabric: $("#rq_fabric").value.trim(),
+      p_fabric_by: $("#rq_fabricby").value,
+      p_due: $("#rq_due").value || null
+    }).then(function (res) {
+      busy("#requestForm", false);
+      if (res.error) return fail(res.error, "Could not send your request");
+      closeModal();
+      toast("Sent ✓ The studio will be in touch");
+      loadCustomer().then(renderCustomer);
+    });
   }
 
   function customerOrderCard(o) {
@@ -651,11 +724,16 @@
           '<div class="card-badges"><span class="pill st-' + st.key + '">' + st.label + "</span>" +
           (o.urgent ? '<span class="badge-urgent">RUSH</span>' : "") + "</div></div>" +
         (o.fabric ? '<div class="card-sub">' + esc(o.fabric) + "</div>" : "") +
-        '<div class="card-foot">' +
-          '<div class="progress"><div class="progress-fill' + (st.progress === 100 ? " done" : "") +
-            '" style="width:' + st.progress + '%"></div></div>' +
-          (o.dueDate ? dueBadge(o) : "") +
-        "</div>" +
+        // a request has no agreed dates yet, so no progress bar and no
+        // "overdue" against a date the studio never promised
+        (isRequest(o)
+          ? '<div class="card-foot"><span class="due-badge due-ok">' +
+              (o.dueDate ? "Hoping for " + esc(fmtDateShort(o.dueDate)) : "No date given") + "</span></div>"
+          : '<div class="card-foot">' +
+              '<div class="progress"><div class="progress-fill' + (st.progress === 100 ? " done" : "") +
+                '" style="width:' + st.progress + '%"></div></div>' +
+              (o.dueDate ? dueBadge(o) : "") +
+            "</div>") +
         (bal > 0 ? '<div class="card-foot"><span class="balance-chip balance-owed">' + money(bal) + " to pay</span></div>" : "") +
       "</div>"
     );
@@ -666,6 +744,10 @@
   function customerTimeline(o) {
     if (o.status === "cancelled") {
       return '<div class="notice" style="background:var(--red-soft);border-color:var(--red-line);color:var(--red)">This order was cancelled.</div>';
+    }
+    if (isRequest(o)) {
+      return '<div class="notice">You asked the studio for this on ' + esc(fmtDate(o.createdAt)) +
+        ". They will confirm the price and the dates with you before any work starts.</div>";
     }
     var at = statusIndex(o.status);
     return '<div class="c-timeline">' + STATUSES.map(function (s, i) {
@@ -2505,6 +2587,8 @@
         esc(me.fullName || me.email) + '</strong> <span class="role-badge role-' + esc(me.role) + '">' + roleLabel + "</span></p>";
     }
 
+    html += requestQueueBlock();
+
     if (db.clients.length === 0 && db.orders.length === 0) {
       html +=
         '<div class="welcome-card">' +
@@ -2551,6 +2635,69 @@
     view.innerHTML = html;
   }
 
+  /* ---------- Pieces clients have asked for ---------- */
+
+  // Sits at the top of the dashboard because a client is waiting on an answer.
+  // Approving is the Admin's call: it sets a price and commits the workroom.
+  function requestQueueBlock() {
+    var list = pendingRequests();
+    if (!list.length) return "";
+    return (
+      '<h3 class="section-title">✂ Requests from clients (' + list.length + ")</h3>" +
+      '<p class="hint" style="margin-bottom:8px">' +
+      (isAdmin()
+        ? "Accepting gives the piece a real order number and puts it in the workroom. Agree the price and dates with her first."
+        : "Only the Admin can accept these.") + "</p>" +
+      '<div class="card-list">' + list.map(function (o) {
+        return (
+          '<div class="item-card" data-open-order="' + o.id + '">' +
+            '<div class="card-top"><div class="card-title">' + esc(o.garment || "A piece") +
+              '<span class="ref" style="margin-left:6px">' + esc(o.ref) + "</span></div>" +
+              '<div class="card-badges"><span class="pill st-requested">Awaiting approval</span></div></div>' +
+            '<div class="card-sub">' + esc(clientName(o.clientId)) +
+              (o.dueDate ? " · hoping for " + esc(fmtDateShort(o.dueDate)) : "") +
+              (o.fabric ? " · " + esc(o.fabric) : "") + "</div>" +
+            (o.description ? '<div class="card-sub" style="margin-top:6px">' + esc(o.description) + "</div>" : "") +
+            (isAdmin()
+              ? '<div class="card-foot"><span class="spacer"></span>' +
+                  '<button class="btn btn-ghost btn-sm" data-decline-request="' + o.id + '">Decline</button>' +
+                  '<button class="btn btn-primary btn-sm" data-approve-request="' + o.id + '">Accept</button>' +
+                "</div>"
+              : "") +
+          "</div>"
+        );
+      }).join("") + "</div>"
+    );
+  }
+
+  function approveRequest(id) {
+    if (!isAdmin()) return;
+    var o = orderById(id);
+    if (!o || !isRequest(o)) return;
+    if (!confirm("Accept " + clientName(o.clientId) + "'s request for " + (o.garment || "this piece") +
+                 "? It becomes a real order and she will see it move through the workroom.")) return;
+    sb.rpc("approve_order", { p_order: id }).then(function (res) {
+      if (res.error) return fail(res.error, "Could not accept that request");
+      toast("Accepted ✓ " + res.data);
+      loadAll().then(function () { renderAll(); showOrderDetail(id); });
+    });
+  }
+
+  function declineRequest(id) {
+    if (!isAdmin()) return;
+    var o = orderById(id);
+    if (!o || !isRequest(o)) return;
+    if (!confirm("Decline this request? She will see it marked as declined. Let her know why yourself.")) return;
+    sb.from("orders").update({ status: "cancelled" }).eq("id", id).select(ORDER_COLS).single().then(function (res) {
+      if (res.error) return fail(res.error, "Could not decline that request");
+      var saved = rowToOrder(res.data);
+      saved.price = o.price; saved.payments = o.payments;
+      db.orders = db.orders.map(function (x) { return x.id === saved.id ? saved : x; });
+      toast("Request declined");
+      renderAll();
+    });
+  }
+
   function statCard(label, value, cls) {
     return '<div class="stat-card ' + cls + '"><div class="stat-label">' + label + '</div><div class="stat-value">' + value + "</div></div>";
   }
@@ -2560,7 +2707,7 @@
   function renderOrders() {
     var view = $("#view-orders");
     var filters = [
-      ["active", "Active"], ["overdue", "Overdue"], ["new", "New"], ["cutting", "Cutting"],
+      ["active", "Active"], ["requested", "Requests"], ["overdue", "Overdue"], ["new", "New"], ["cutting", "Cutting"],
       ["sewing", "Sewing"], ["fitting", "Fitting"], ["adjustments", "Adjustments"],
       ["ready", "Ready"], ["delivered", "Delivered"], ["all", "All"]
     ];
@@ -3586,7 +3733,7 @@
   document.addEventListener("click", function (e) {
     var t = e.target;
 
-    var el = t.closest("[data-tab],[data-action],[data-order-filter],[data-open-order],[data-open-client],[data-advance-order],[data-edit-client],[data-delete-client],[data-new-order-for],[data-edit-order],[data-delete-order],[data-set-status],[data-del-payment],[data-print-order],[data-modal-overlay],[data-an-shift],[data-delete-user],[data-inv-cat],[data-open-item],[data-edit-item],[data-delete-item],[data-stock-in],[data-stock-out],[data-add-photo],[data-open-photo],[data-delete-photo],[data-back-to],[data-open-invoice],[data-invoice-order],[data-invoice-client],[data-pick-invoice-client],[data-add-line],[data-del-line],[data-delete-invoice],[data-invoice-paid],[data-invoice-unpaid],[data-download-invoice],[data-approve-user],[data-theme-set],[data-share-image],[data-image-invoice],[data-lb-step],[data-ctab],[data-ctab-go],[data-open-my-order],[data-signup-as],[data-link-customer],[data-accept-measurements],[data-discard-measurements]");
+    var el = t.closest("[data-tab],[data-action],[data-order-filter],[data-open-order],[data-open-client],[data-advance-order],[data-edit-client],[data-delete-client],[data-new-order-for],[data-edit-order],[data-delete-order],[data-set-status],[data-del-payment],[data-print-order],[data-modal-overlay],[data-an-shift],[data-delete-user],[data-inv-cat],[data-open-item],[data-edit-item],[data-delete-item],[data-stock-in],[data-stock-out],[data-add-photo],[data-open-photo],[data-delete-photo],[data-back-to],[data-open-invoice],[data-invoice-order],[data-invoice-client],[data-pick-invoice-client],[data-add-line],[data-del-line],[data-delete-invoice],[data-invoice-paid],[data-invoice-unpaid],[data-download-invoice],[data-approve-user],[data-theme-set],[data-share-image],[data-image-invoice],[data-lb-step],[data-ctab],[data-ctab-go],[data-open-my-order],[data-signup-as],[data-link-customer],[data-accept-measurements],[data-discard-measurements],[data-approve-request],[data-decline-request]");
     if (!el) return;
 
     if (el.hasAttribute("data-theme-set")) { setTheme(el.getAttribute("data-theme-set")); return; }
@@ -3632,6 +3779,8 @@
       });
       return;
     }
+    if (el.hasAttribute("data-approve-request")) { e.stopPropagation(); approveRequest(el.getAttribute("data-approve-request")); return; }
+    if (el.hasAttribute("data-decline-request")) { e.stopPropagation(); declineRequest(el.getAttribute("data-decline-request")); return; }
     if (el.hasAttribute("data-link-customer")) { linkCustomer(el.getAttribute("data-link-customer")); return; }
     if (el.hasAttribute("data-accept-measurements")) { reviewMeasurements(el.getAttribute("data-accept-measurements"), true); return; }
     if (el.hasAttribute("data-discard-measurements")) { reviewMeasurements(el.getAttribute("data-discard-measurements"), false); return; }
@@ -3731,6 +3880,7 @@
       case "invoice-settings": showInvoiceSettings(); break;
       case "open-settings": showSettings(); break;
       case "customer-menu": switchCustomerTab("account"); break;
+      case "request-piece": showRequestForm(); break;
       case "export-data": exportData(); break;
       case "sign-out": e.preventDefault(); signOut(); break;
       case "recheck-approval":
@@ -3809,6 +3959,7 @@
     else if (form.id === "signupForm") { e.preventDefault(); doSignUp(form); }
     else if (form.id === "settingsForm") { e.preventDefault(); saveSettings(); }
     else if (form.id === "myMeasureForm") { e.preventDefault(); submitMyMeasurements(); }
+    else if (form.id === "requestForm") { e.preventDefault(); submitRequest(); }
     else if (form.id === "paymentForm") {
       e.preventDefault();
       if (!isAdmin()) return;

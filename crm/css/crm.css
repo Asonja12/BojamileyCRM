@@ -384,6 +384,7 @@ input, select, textarea { font: inherit; color: inherit; }
 .st-ready       { background: var(--green-soft);   color: var(--green); }
 .st-delivered   { background: var(--neutral-soft); color: var(--neutral); }
 .st-cancelled   { background: var(--red-soft);    color: var(--red); }
+.st-requested   { background: var(--violet-soft); color: var(--violet); }
 
 .due-badge { font-weight: 700; font-size: 12.5px; padding: 3px 10px; border-radius: 999px; }
 .due-overdue { background: var(--red-soft); color: var(--red); }
