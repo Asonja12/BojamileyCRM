@@ -3268,7 +3268,13 @@
     var roleLabel = { admin: "Admin", staff: "Staff", viewer: "Viewer" }[me ? me.role : "viewer"];
 
     var pending = db.profiles.filter(function (p) { return p.role === "pending"; });
-    var approved = db.profiles.filter(function (p) { return p.role !== "pending"; });
+    // Clients are not team members and must not appear in this list. The role
+    // dropdown below only offers the studio roles, so a client landing in it
+    // would show as whatever came first - "Admin (full access)" - and one
+    // stray tap on that select would have actually made her an admin.
+    var approved = db.profiles.filter(function (p) {
+      return p.role !== "pending" && p.role !== "customer";
+    });
 
     var pendingBlock = "";
     if (isAdmin() && pending.length) {
@@ -3285,6 +3291,8 @@
                   '<option value="staff">Staff</option>' +
                   '<option value="viewer">Viewer</option>' +
                   '<option value="admin">Admin</option>' +
+                  // for someone who picked "I work here" by mistake
+                  '<option value="customer">Client</option>' +
                 "</select>" +
                 '<button class="btn btn-primary btn-sm" data-approve-user="' + p.id + '">Approve</button>' +
                 '<button class="btn btn-danger btn-sm" data-delete-user="' + p.id + '">Reject</button>' +
@@ -3333,7 +3341,7 @@
 
         pendingBlock +
 
-        customerSignupBlock() +
+        clientAccountsBlock() +
 
         themeToggle() +
 
@@ -3380,33 +3388,60 @@
     });
   }
 
-  function customerSignupBlock() {
+  function linkedClientFor(userId) {
+    var found = null;
+    db.clients.forEach(function (c) { if (c.userId === userId) found = c; });
+    return found;
+  }
+
+  // Clients with a sign-in, kept well away from the Team list: they are not
+  // staff, and the studio roles do not apply to them.
+  function clientAccountsBlock() {
+    if (!isAdmin()) return "";
+    var accounts = db.profiles.filter(function (p) { return p.role === "customer"; });
+    if (!accounts.length) return "";
     var waiting = unlinkedCustomers();
-    if (!isAdmin() || !waiting.length) return "";
     var free = db.clients.filter(function (c) { return !c.userId; });
 
-    return (
-      '<h3 class="section-title">🔗 Client sign-ups (' + waiting.length + ")</h3>" +
-      '<p class="hint" style="margin-bottom:8px">Connect each one to her record so she sees her own orders and nothing else. ' +
-      "If she is new to the studio, choose <em>Create a new client</em>. Only connect people you recognise.</p>" +
-      waiting.map(function (p) {
+    var rows = accounts.map(function (p) {
+      var linked = linkedClientFor(p.id);
+      if (linked) {
         return (
-          '<div class="pending-row">' +
-            '<div class="t-name">' + esc(p.fullName || "(no name)") + "</div>" +
-            '<div class="t-email">' + esc(p.email) + "</div>" +
-            '<div class="pending-actions">' +
-              '<select data-link-to="' + p.id + '">' +
-                '<option value="__new__">Create a new client</option>' +
-                free.map(function (c) {
-                  return '<option value="' + c.id + '">' + esc(c.name) + "</option>";
-                }).join("") +
-              "</select>" +
-              '<button class="btn btn-primary btn-sm" data-link-customer="' + p.id + '">Connect</button>' +
-              '<button class="btn btn-danger btn-sm" data-delete-user="' + p.id + '">Reject</button>' +
+          '<div class="team-row">' +
+            '<div><div class="t-name">' + esc(p.fullName || "(no name)") + "</div>" +
+            '<div class="t-email">' + esc(p.email) + " · sees " + esc(linked.name) + "</div></div>" +
+            '<div style="display:flex;align-items:center;gap:6px">' +
+              '<span class="role-badge role-client">Client</span>' +
+              '<button class="btn btn-ghost btn-sm" data-delete-user="' + p.id + '" title="Remove this sign-in">✕</button>' +
             "</div>" +
           "</div>"
         );
-      }).join("")
+      }
+      return (
+        '<div class="pending-row">' +
+          '<div class="t-name">' + esc(p.fullName || "(no name)") + "</div>" +
+          '<div class="t-email">' + esc(p.email) + "</div>" +
+          '<div class="pending-actions">' +
+            '<select data-link-to="' + p.id + '">' +
+              '<option value="__new__">Create a new client</option>' +
+              free.map(function (c) {
+                return '<option value="' + c.id + '">' + esc(c.name) + "</option>";
+              }).join("") +
+            "</select>" +
+            '<button class="btn btn-primary btn-sm" data-link-customer="' + p.id + '">Connect</button>' +
+            '<button class="btn btn-danger btn-sm" data-delete-user="' + p.id + '">Reject</button>' +
+          "</div>" +
+        "</div>"
+      );
+    }).join("");
+
+    return (
+      '<h3 class="section-title">👗 Client accounts (' + accounts.length + ")</h3>" +
+      '<p class="hint" style="margin-bottom:8px">' +
+      (waiting.length
+        ? waiting.length + " waiting to be connected. Connecting shows her that client's orders, measurements and balances, so only connect people you recognise."
+        : "Clients who sign in to follow their own orders. They see nothing else in the studio.") +
+      "</p>" + rows
     );
   }
 
