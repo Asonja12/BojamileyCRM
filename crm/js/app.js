@@ -13,6 +13,11 @@
 
   var sb = window.supabase.createClient(window.CRM_CONFIG.url, window.CRM_CONFIG.key);
 
+  // Shown at the bottom of the Menu and of a client's Account tab. When
+  // something looks like it did not ship, this says whether the phone is
+  // actually running the new copy. Keep it in step with the ?v= in index.html.
+  var APP_VERSION = "20260728a";
+
   /* ---------- Domain constants ---------- */
 
   var STATUSES = [
@@ -874,7 +879,8 @@
       themeToggle() +
       '<div class="modal-actions"><span class="spacer"></span>' +
         '<button class="btn btn-danger" data-action="sign-out">Sign Out</button>' +
-      "</div>";
+      "</div>" +
+      '<div class="hint" style="text-align:center;margin-top:10px">Version ' + esc(APP_VERSION) + "</div>";
   }
 
   function switchCustomerTab(tab) {
@@ -1857,12 +1863,34 @@
         "</div>" +
       "</div>"
     );
+    // Opening an invoice is the only route to Download PDF, so start fetching
+    // the engine now. By the time she reaches for the button it is usually
+    // there, and if she never taps it nothing was wasted on page load.
+    loadJsPdf();
   }
 
   /* ---- PDF ----------------------------------------------------------
      Drawn with jsPDF rather than screenshotting the page, so the text
      stays crisp and selectable and the file stays small (~10 KB).
      -------------------------------------------------------------------- */
+
+  // The PDF engine is 113 KB gzipped - more than this app and its database
+  // client combined - and is reached from exactly one button, which only an
+  // Admin sees. Every client on mobile data was paying for it on every load, so
+  // it is fetched the first time it is actually wanted and kept thereafter.
+  var jsPdfPromise = null;
+  function loadJsPdf() {
+    if (window.jspdf && window.jspdf.jsPDF) return Promise.resolve(true);
+    if (jsPdfPromise) return jsPdfPromise;
+    jsPdfPromise = new Promise(function (resolve) {
+      var s = document.createElement("script");
+      s.src = "js/jspdf.js?v=" + APP_VERSION;
+      s.onload = function () { resolve(!!(window.jspdf && window.jspdf.jsPDF)); };
+      s.onerror = function () { jsPdfPromise = null; resolve(false); };
+      document.head.appendChild(s);
+    });
+    return jsPdfPromise;
+  }
 
   function invoicePdf(v) {
     var jsPDFctor = window.jspdf && window.jspdf.jsPDF;
@@ -2016,9 +2044,15 @@
   function downloadInvoice(id) {
     var v = invoiceById(id);
     if (!v) return;
-    var doc = invoicePdf(v);
-    if (!doc) { toast("PDF engine did not load", true); return; }
-    doc.save(invoiceFileName(v));
+    loadJsPdf().then(function (ready) {
+      if (!ready) {
+        toast("Could not load the PDF tool just now. Check your connection and try again.", true);
+        return;
+      }
+      var doc = invoicePdf(v);
+      if (!doc) { toast("Could not build the PDF", true); return; }
+      doc.save(invoiceFileName(v));
+    });
   }
 
   function invoiceMessage(v) {
@@ -3508,6 +3542,7 @@
           '<span class="spacer"></span>' +
           '<button class="btn btn-danger" data-action="sign-out">Sign Out</button>' +
         "</div>" +
+        '<div class="hint" style="text-align:center;margin-top:10px">Version ' + esc(APP_VERSION) + "</div>" +
       "</div>"
     );
   }
