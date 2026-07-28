@@ -23,7 +23,10 @@
     })();
   </script>
 
-  <link rel="stylesheet" href="css/crm.css">
+  <!-- ?v= is bumped whenever these change. index.html itself is served
+       no-cache (see _headers), so a new version number here is a URL the
+       browser has never seen and cannot serve a stale copy of. -->
+  <link rel="stylesheet" href="css/crm.css?v=20260728a">
 </head>
 <body>
 
@@ -156,9 +159,11 @@
   <div id="modalRoot"></div>
   <div id="toastRoot" aria-live="polite"></div>
 
+  <!-- jspdf.js is deliberately NOT here. It is 113 KB gzipped, more than the
+       app and its database client put together, and only an Admin tapping
+       "Download PDF" ever needs it. app.js fetches it on demand. -->
   <script src="js/supabase.js"></script>
-  <script src="js/jspdf.js"></script>
   <script src="js/config.js"></script>
-  <script src="js/app.js"></script>
+  <script src="js/app.js?v=20260728a"></script>
 </body>
 </html>
