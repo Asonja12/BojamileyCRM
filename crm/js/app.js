@@ -203,9 +203,44 @@
     setTimeout(function () { el.remove(); }, isError ? 4200 : 2600);
   }
 
+  // Postgres and Supabase write for developers. A client waiting on her wedding
+  // dress should never be shown "permission denied for table clients", so the
+  // errors that can actually reach a person are translated into plain language.
+  // Anything unrecognised falls back to the caller's own wording. The technical
+  // text still goes to the console for whoever has to fix it.
+  function friendlyError(error) {
+    if (!navigator.onLine) return "You appear to be offline. Check your connection and try again.";
+    var raw = (error && (error.message || error.error_description || error.msg)) || "";
+    var code = String((error && (error.code || error.status)) || "");
+    var t = String(raw).toLowerCase();
+
+    if (t.indexOf("failed to fetch") !== -1 || t.indexOf("networkerror") !== -1 || t.indexOf("load failed") !== -1)
+      return "Could not reach the studio just now. Check your connection and try again.";
+    if (t.indexOf("invalid login credentials") !== -1)
+      return "That email and password do not match. Please check them and try again.";
+    if (t.indexOf("email not confirmed") !== -1)
+      return "Please open the confirmation link in your email first, then sign in.";
+    if (t.indexOf("already registered") !== -1 || t.indexOf("already been registered") !== -1)
+      return "There is already an account with that email. Try signing in instead.";
+    if (t.indexOf("password should be") !== -1 || t.indexOf("password is too short") !== -1)
+      return "Please choose a password of at least 6 characters.";
+    if (t.indexOf("not linked to a client") !== -1)
+      return "Your account is not connected to your records yet. The studio will do that shortly.";
+    if (t.indexOf("duplicate key") !== -1 && t.indexOf("user_id") !== -1)
+      return "That client is already connected to another sign-in.";
+    if (t.indexOf("duplicate key") !== -1)
+      return "That already exists.";
+    if (t.indexOf("permission denied") !== -1 || t.indexOf("row-level security") !== -1 || code === "42501")
+      return "Your account does not have access to that. If you have just signed up, the studio still needs to connect your account.";
+    if (t.indexOf("jwt") !== -1 || t.indexOf("expired") !== -1 || code === "401")
+      return "Your session has ended. Please sign in again.";
+    return null;   // nothing specific to say; the caller's wording is better
+  }
+
   function fail(error, context) {
-    var msg = (error && (error.message || error.error_description)) || "Something went wrong";
-    toast((context ? context + ": " : "") + msg, true);
+    if (window.console && console.error) console.error(context || "Error", error);
+    var known = friendlyError(error);
+    toast(known || ((context || "Something went wrong") + ". Please try again."), true);
   }
 
   /* ---------- Row mappers (DB snake_case <-> app camelCase) ---------- */
@@ -400,8 +435,10 @@
         renderAll();
       });
     }).catch(function (e) {
+      // The account itself is fine at this point - signing in worked and it was
+      // loading that failed - so do not word this as a rejected sign-in.
       show("authView");
-      fail(e, "Could not sign you in");
+      fail(e, "Your account is fine, but we could not load your information");
     });
   }
 
@@ -438,7 +475,11 @@
     btn.disabled = true; btn.textContent = "Signing in…";
     sb.auth.signInWithPassword({ email: $("#si_email").value.trim(), password: $("#si_password").value })
       .then(function (res) {
-        if (res.error) { err.textContent = res.error.message; err.hidden = false; return; }
+        if (res.error) {
+          err.textContent = friendlyError(res.error) || "Could not sign you in. Please try again.";
+          err.hidden = false;
+          return;
+        }
         show("loadingView");
         enterApp(res.data.session);
       })
@@ -457,12 +498,21 @@
       // client record, where the default "pending" is still nothing at all.
       options: { data: { full_name: $("#su_name").value.trim(), account_type: signupAs() } }
     }).then(function (res) {
-      if (res.error) { err.textContent = res.error.message; err.hidden = false; return; }
+      if (res.error) {
+        err.textContent = friendlyError(res.error) || "Could not create your account. Please try again.";
+        err.hidden = false;
+        return;
+      }
+      var asClient = signupAs() === "customer";
       if (res.data.session) {
         show("loadingView");
         enterApp(res.data.session);
       } else {
-        info.textContent = "Account created. Check your email for a confirmation link, then come back and sign in.";
+        // Email confirmation is on, so there is no session yet. Say what
+        // happened and what happens next, without sounding like a failure.
+        info.textContent = asClient
+          ? "Your account is created. Open the confirmation link in your email, then sign in — the studio will connect you to your records."
+          : "Account created. Open the confirmation link in your email, then sign in. An Admin will approve your access.";
         info.hidden = false;
       }
     }).finally(function () { btn.disabled = false; btn.textContent = "Create Account"; });
