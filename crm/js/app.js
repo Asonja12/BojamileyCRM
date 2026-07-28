@@ -16,7 +16,7 @@
   // Shown at the bottom of the Menu and of a client's Account tab. When
   // something looks like it did not ship, this says whether the phone is
   // actually running the new copy. Keep it in step with the ?v= in index.html.
-  var APP_VERSION = "20260728b";
+  var APP_VERSION = "20260728c";
 
   /* ---------- Domain constants ---------- */
 
@@ -631,7 +631,7 @@
         "<p>" + (open.length
           ? open.length + (open.length === 1 ? " piece is" : " pieces are") + " being made for you."
           : "Nothing in the workroom right now.") + "</p>" +
-        '<button class="btn" data-action="request-piece">✂ Request a piece</button>' +
+        '<button class="btn c-hero-cta" data-action="request-piece">Place an order</button>' +
       "</div>";
 
     if (waiting.length) {
@@ -646,8 +646,14 @@
 
     if (!measurementsFilled(c)) {
       html +=
-        '<div class="notice">Adding your measurements helps the studio cut to your exact size. ' +
-        '<button class="btn btn-subtle btn-sm" data-ctab-go="measurements" style="margin-top:6px">Add my measurements</button></div>';
+        '<div class="c-prompt">' +
+          '<div class="c-prompt-icon" aria-hidden="true">📏</div>' +
+          '<div class="c-prompt-body">' +
+            "<h4>Add your measurements</h4>" +
+            "<p>So the studio can cut to your exact size. A standard size on its own is enough to start with.</p>" +
+            '<button class="btn btn-primary btn-sm" data-ctab-go="measurements">Add my measurements</button>' +
+          "</div>" +
+        "</div>";
     }
 
     html += open.length
@@ -660,8 +666,8 @@
 
     if (!orders.length) {
       html += '<div class="empty"><span class="empty-icon">🧵</span><h3>Nothing here yet</h3>' +
-        "<p>Ask the studio for a piece and you can follow it here from cutting through to collection, with photos as it comes together.</p>" +
-        '<button class="btn btn-primary" data-action="request-piece">✂ Request a piece</button></div>';
+        "<p>Place an order and you can follow it here from cutting through to collection, with photos as it comes together.</p>" +
+        '<button class="btn btn-primary" data-action="request-piece">Place an order</button></div>';
     }
 
     view.innerHTML = html;
@@ -672,7 +678,7 @@
   function showRequestForm() {
     if (!isCustomer() || !myClient()) return;
     openModal(
-      modalHead("Request a piece", "The studio will confirm the price and dates with you before starting.") +
+      modalHead("Place an order", "The studio will confirm the price and dates with you before starting.") +
       '<div class="modal-body"><form id="requestForm">' +
         '<div class="field"><label for="rq_garment">What would you like made? *</label>' +
           '<input id="rq_garment" list="garmentList" required maxlength="80" placeholder="e.g. Aso-Ebi Gown">' +
@@ -694,7 +700,7 @@
         '<div class="hint" style="margin-top:8px">Nothing is confirmed until the studio accepts it, and no price is set yet.</div>' +
         '<div class="modal-actions"><span class="spacer"></span>' +
           '<button type="button" class="btn btn-ghost" data-action="close-modal">Cancel</button>' +
-          '<button type="submit" class="btn btn-primary">Send request</button>' +
+          '<button type="submit" class="btn btn-primary">Send to the studio</button>' +
         "</div>" +
       "</form></div>"
     );
@@ -813,6 +819,9 @@
     // the confirmed set. Either way the form shows the newest numbers she gave.
     var pending = c.pendingMeasurements;
     var m = pending || c.measurements || {};
+    // while it is waiting the note rides inside the blob; once accepted the
+    // studio holds it in measure_notes, so read it back from wherever it is now
+    var noteValue = pending ? (pending.notes || "") : (c.measureNotes || "");
 
     view.innerHTML =
       '<div class="view-head"><h2>My measurements</h2></div>' +
@@ -835,6 +844,11 @@
               '<input id="my_' + f[0] + '" type="number" step="any" inputmode="decimal" value="' + esc(m[f[0]] || "") + '"></div>';
           }).join("") +
         "</div>" +
+        '<div class="field" style="margin-top:14px"><label for="my_notes">Anything else</label>' +
+          '<textarea id="my_notes" rows="3" maxlength="600" placeholder="Measurements not listed above, how you like things to fit, anything the studio should know…">' +
+          esc(noteValue) + "</textarea>" +
+          '<div class="hint">For example: “I prefer sleeves a little loose”, or a measurement there is no box for.</div>' +
+        "</div>" +
         '<div class="modal-actions"><span class="spacer"></span>' +
           '<button type="submit" class="btn btn-primary">Send to the studio</button>' +
         "</div>" +
@@ -849,6 +863,10 @@
       var v = $("#my_" + f[0]).value.trim();
       if (v) out[f[0]] = v;
     });
+    // Travels inside the same blob, but the studio keeps free text in
+    // measure_notes, so accepting splits it back out - see reviewMeasurements.
+    var note = $("#my_notes").value.trim();
+    if (note) out.notes = note;
     busy("#myMeasureForm", true);
     sb.rpc("submit_measurements", { p_measurements: out }).then(function (res) {
       busy("#myMeasureForm", false);
@@ -902,7 +920,7 @@
     // unmissable badge when people are waiting to be let in, or a client has
     // signed up and is still waiting to be connected to her records
     var waiting = isAdmin()
-      ? db.profiles.filter(function (p) { return p.role === "pending"; }).length
+      ? db.profiles.filter(function (p) { return p.role === "pending"; }).length + unlinkedCustomers().length
       : 0;
     $("#menuBtn").innerHTML = "&#9881; Menu" +
       (waiting ? ' <span class="menu-badge">' + waiting + "</span>" : "");
@@ -2621,7 +2639,7 @@
         esc(me.fullName || me.email) + '</strong> <span class="role-badge role-' + esc(me.role) + '">' + roleLabel + "</span></p>";
     }
 
-    html += clientSignupQueueBlock() + requestQueueBlock();
+    html += requestQueueBlock();
 
     if (db.clients.length === 0 && db.orders.length === 0) {
       html +=
@@ -3526,6 +3544,8 @@
 
         pendingBlock +
 
+        clientSignupQueueBlock() +
+
         themeToggle() +
 
         '<h3 class="section-title">👥 Team</h3>' +
@@ -3578,11 +3598,11 @@
     return found;
   }
 
-  // Only the sign-ups still waiting on someone, and only while there are any.
-  // Connected accounts are not listed anywhere as a group: there could be
-  // hundreds of them and none of them need anything doing, so each one shows on
-  // her own client instead. This lives on the Dashboard rather than the Menu
-  // because a person is sitting there seeing nothing until it is dealt with.
+  // Only the sign-ups still waiting on someone, and only while there are any,
+  // so the Menu stays short however many clients sign up. Connected accounts
+  // are not listed anywhere as a group: there could be hundreds and none of
+  // them need anything doing, so each one shows on her own client instead.
+  // The red count on the Menu button is what says these are waiting.
   function clientSignupQueueBlock() {
     if (!isAdmin()) return "";
     var waiting = unlinkedCustomers();
@@ -3665,8 +3685,14 @@
     if (!confirm("Connect " + who + " to " + target + "? She will be able to see that client's orders, measurements and balances.")) return;
 
     function done() {
+      // Only redraw the Menu if that is where the tap came from. Reopening it
+      // regardless threw a modal up over whatever you were looking at.
+      var inMenu = !!$("#modalRoot .modal-card");
       toast(who + " is connected ✓");
-      loadAll().then(function () { renderAll(); showSettings(); });
+      loadAll().then(function () {
+        renderAll();
+        if (inMenu) showSettings();
+      });
     }
 
     if (choice === "__new__") {
@@ -3696,6 +3722,7 @@
         rows.push([f[1], old[f[0]] || "—", m[f[0]]]);
       }
     });
+    var noteChanged = m.notes && String(m.notes) !== String(c.measureNotes || "");
     return (
       '<div class="notice" style="margin-top:14px">' +
         "<strong>" + esc(c.name.split(" ")[0]) + " sent in measurements</strong>" +
@@ -3705,7 +3732,11 @@
               return "<tr><td>" + esc(r[0]) + '</td><td style="text-align:right">' +
                 esc(r[1]) + " → <strong>" + esc(r[2]) + "</strong></td></tr>";
             }).join("") + "</table>"
-          : "<p>Nothing differs from what you already have on file.</p>") +
+          : "") +
+        (noteChanged
+          ? '<p style="margin-top:8px"><strong>She also wrote:</strong> “' + esc(m.notes) + "”</p>"
+          : "") +
+        (!rows.length && !noteChanged ? "<p>Nothing differs from what you already have on file.</p>" : "") +
         '<div class="pending-actions">' +
           '<button class="btn btn-primary btn-sm" data-accept-measurements="' + c.id + '">Accept</button>' +
           '<button class="btn btn-ghost btn-sm" data-discard-measurements="' + c.id + '">Discard</button>' +
@@ -3718,7 +3749,15 @@
     var c = clientById(clientId);
     if (!c || !canEdit() || !c.pendingMeasurements) return;
     var patch = { pending_measurements: null, pending_measurements_at: null };
-    if (accept) patch.measurements = c.pendingMeasurements;
+    if (accept) {
+      // Split her free text back out into measure_notes, where the studio's own
+      // notes live, rather than leaving it inside the measurements blob.
+      var incoming = c.pendingMeasurements || {};
+      var sizes = {};
+      Object.keys(incoming).forEach(function (k) { if (k !== "notes") sizes[k] = incoming[k]; });
+      patch.measurements = sizes;
+      if (incoming.notes) patch.measure_notes = incoming.notes;
+    }
     sb.from("clients").update(patch).eq("id", clientId).select(CLIENT_COLS).single().then(function (res) {
       if (res.error) return fail(res.error, "Could not update measurements");
       var saved = rowToClient(res.data);

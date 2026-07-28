@@ -1353,6 +1353,38 @@ input, select, textarea { font: inherit; color: inherit; }
 .c-hero h2 { font-size: 23px; margin-bottom: 4px; }
 .c-hero p { opacity: 0.92; font-size: 14.5px; }
 
+/* white on the dark gradient, the same treatment the studio's welcome card
+   uses, so it reads as the one thing to do here */
+.c-hero-cta {
+  margin-top: 16px;
+  background: #fff;
+  color: #8a4e04;
+  border: none;
+  font-weight: 700;
+  padding: 11px 20px;
+}
+
+.c-hero-cta:hover { background: #f7ede1; }
+
+/* a prompt that is worth doing but not urgent: a card, not a warning strip */
+.c-prompt {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin-bottom: 14px;
+  box-shadow: var(--shadow);
+}
+
+.c-prompt-icon { font-size: 22px; line-height: 1.2; flex: 0 0 auto; }
+.c-prompt-body { flex: 1 1 auto; min-width: 0; }
+.c-prompt-body h4 { font-size: 15.5px; margin-bottom: 3px; }
+.c-prompt-body p { font-size: 13.5px; color: var(--muted); margin-bottom: 10px; }
+
 .c-balance {
   display: flex;
   align-items: baseline;
