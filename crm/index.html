@@ -53,6 +53,10 @@
       </form>
 
       <form id="signupForm" hidden>
+        <div class="seg-toggle" role="group" aria-label="Account type">
+          <button type="button" class="seg-btn" data-signup-as="customer" aria-pressed="true">I&rsquo;m a client</button>
+          <button type="button" class="seg-btn" data-signup-as="team" aria-pressed="false">I work here</button>
+        </div>
         <div class="field"><label for="su_name">Full name</label>
           <input id="su_name" type="text" required autocomplete="name" placeholder="e.g. Asonja Taiwo"></div>
         <div class="field"><label for="su_email">Email</label>
@@ -116,6 +120,36 @@
       <section id="view-inventory" class="view"></section>
       <section id="view-invoices" class="view"></section>
       <section id="view-analytics" class="view"></section>
+    </main>
+  </div>
+
+  <!-- The customer portal. A separate shell from the studio app above, on
+       purpose: none of the CRM's render code runs for a customer, so the
+       studio's screens cannot be reached even if a role were mis-set. -->
+  <div id="customerApp" hidden>
+    <header class="topbar">
+      <div class="brand">
+        <img class="brand-mark" src="img/logo.svg" alt="Bojamiley logo">
+        <div class="brand-text">
+          <h1 id="cBrandName">Bojamiley</h1>
+          <p class="brand-sub">Your atelier</p>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <button class="btn btn-ghost" data-action="customer-menu">&#9881; Menu</button>
+      </div>
+    </header>
+
+    <nav class="tabs" aria-label="Main sections">
+      <button class="tab active" data-ctab="home">My Orders</button>
+      <button class="tab" data-ctab="measurements">My Measurements</button>
+      <button class="tab" data-ctab="account">Account</button>
+    </nav>
+
+    <main class="main">
+      <section id="cview-home" class="view active"></section>
+      <section id="cview-measurements" class="view"></section>
+      <section id="cview-account" class="view"></section>
     </main>
   </div>
 

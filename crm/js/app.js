@@ -94,6 +94,7 @@
 
   function isAdmin() { return !!me && me.role === "admin"; }
   function canEdit() { return !!me && (me.role === "admin" || me.role === "staff"); }
+  function isCustomer() { return !!me && me.role === "customer"; }
 
   /* ---------- Helpers ---------- */
 
@@ -211,7 +212,7 @@
 
   // Contact columns (phone, email, address) are admin-only in the database;
   // everyone else can only read these columns of the clients table.
-  var CLIENT_COLS = "id,name,notes,measure_notes,measurements,created_at";
+  var CLIENT_COLS = "id,name,notes,measure_notes,measurements,created_at,user_id,pending_measurements,pending_measurements_at";
 
   // Money columns (price, payments) are admin-only in the database;
   // everyone else can only read these columns of the orders table.
@@ -225,7 +226,11 @@
       id: r.id, name: r.name,
       phone: r.phone || "", email: r.email || "", address: r.address || "",
       notes: r.notes, measureNotes: r.measure_notes,
-      measurements: r.measurements || {}, createdAt: r.created_at
+      measurements: r.measurements || {}, createdAt: r.created_at,
+      userId: r.user_id || null,
+      // measurements she sent in that the studio has not confirmed yet
+      pendingMeasurements: r.pending_measurements || null,
+      pendingMeasurementsAt: r.pending_measurements_at || null
     };
   }
 
@@ -363,7 +368,7 @@
   var myUserId = null;
 
   function show(id) {
-    ["loadingView", "authView", "pendingView", "app"].forEach(function (v) {
+    ["loadingView", "authView", "pendingView", "app", "customerApp"].forEach(function (v) {
       document.getElementById(v).hidden = v !== id;
     });
   }
@@ -382,6 +387,13 @@
         $("#pendingWho").textContent = me ? (me.fullName || me.email) : "";
         show("pendingView");
         return;
+      }
+      // A customer never loads the studio's data and never renders its screens.
+      if (me.role === "customer") {
+        return loadCustomer().then(function () {
+          show("customerApp");
+          renderCustomer();
+        });
       }
       return loadAll().then(function () {
         show("app");
@@ -412,8 +424,11 @@
 
   // refresh silently when the tab regains focus, so phones stay in sync
   document.addEventListener("visibilitychange", function () {
-    if (!document.hidden && myUserId && !$("#app").hidden) {
+    if (document.hidden || !myUserId) return;
+    if (!$("#app").hidden) {
       loadAll().then(renderAll).catch(function () { /* offline; keep showing what we have */ });
+    } else if (!$("#customerApp").hidden) {
+      loadCustomer().then(renderCustomer).catch(function () { /* offline */ });
     }
   });
 
@@ -437,7 +452,10 @@
     sb.auth.signUp({
       email: $("#su_email").value.trim(),
       password: $("#su_password").value,
-      options: { data: { full_name: $("#su_name").value.trim() } }
+      // account_type is self-declared, which is safe because the database only
+      // ever reads it to grant *less* than the default: "customer" sees one
+      // client record, where the default "pending" is still nothing at all.
+      options: { data: { full_name: $("#su_name").value.trim(), account_type: signupAs() } }
     }).then(function (res) {
       if (res.error) { err.textContent = res.error.message; err.hidden = false; return; }
       if (res.data.session) {
@@ -454,6 +472,285 @@
     sb.auth.signOut().then(function () { toast("Signed out"); });
   }
 
+  function signupAs() {
+    var on = $('[data-signup-as][aria-pressed="true"]');
+    return on ? on.getAttribute("data-signup-as") : "customer";
+  }
+
+  /* ============================================================
+     CUSTOMER PORTAL
+
+     A client of the studio signs in here instead of the CRM. She is
+     linked to exactly one client record by an admin, and the database
+     serves her only that record and its orders - the row-level rules do
+     the work, this code just draws what comes back.
+
+     It reuses the studio's helpers (statusOf, money, photoStrip, the
+     photo gallery) but none of its screens, so nothing here can put the
+     CRM's views on a customer's phone.
+     ============================================================ */
+
+  var cui = { tab: "home" };
+
+  function myClient() {
+    return db.clients.length ? db.clients[0] : null;   // the database returns only hers
+  }
+
+  function loadCustomer() {
+    return Promise.all([
+      sb.from("settings").select("*").eq("id", 1).single(),
+      sb.from("clients").select(CLIENT_COLS),
+      sb.from("orders").select(ORDER_COLS).order("created_at", { ascending: false }),
+      sb.from("order_money").select("*"),
+      sb.from("photos").select("*").order("created_at"),
+      sb.from("client_contacts").select("*")
+    ]).then(function (res) {
+      var errs = res.filter(function (r) { return r.error; });
+      if (errs.length) throw errs[0].error;
+      db.settings = { businessName: res[0].data.business_name, currency: res[0].data.currency };
+      db.clients = (res[1].data || []).map(rowToClient);
+      db.orders = (res[2].data || []).map(rowToOrder);
+      var moneyRows = {};
+      (res[3].data || []).forEach(function (r) { moneyRows[r.id] = r; });
+      db.orders.forEach(function (o) {
+        var k = moneyRows[o.id];
+        if (k) { o.price = Number(k.price || 0); o.payments = k.payments || []; }
+      });
+      db.photos = (res[4].data || []).map(rowToPhoto);
+      var contacts = {};
+      (res[5].data || []).forEach(function (r) { contacts[r.id] = r; });
+      db.clients.forEach(function (c) {
+        var k = contacts[c.id];
+        if (k) { c.phone = k.phone || ""; c.email = k.email || ""; c.address = k.address || ""; }
+      });
+    });
+  }
+
+  function renderCustomer() {
+    $("#cBrandName").textContent = db.settings.businessName || "Bojamiley";
+    document.title = (db.settings.businessName || "Bojamiley") + " · My orders";
+    renderCustomerHome();
+    renderCustomerMeasurements();
+    renderCustomerAccount();
+  }
+
+  // Until an admin links her sign-in to a client record the database returns
+  // her nothing, so say so plainly rather than showing empty screens.
+  function notLinkedYet(what) {
+    return (
+      '<div class="empty"><span class="empty-icon">👋</span>' +
+      "<h3>Welcome to " + esc(db.settings.businessName || "Bojamiley") + "</h3>" +
+      "<p>Your account is set up. The studio just needs to connect it to your " +
+      "records before your " + what + " appear here. This usually only takes a moment " +
+      "the next time they are in.</p></div>"
+    );
+  }
+
+  function renderCustomerHome() {
+    var c = myClient();
+    var view = $("#cview-home");
+    if (!c) { view.innerHTML = notLinkedYet("orders"); return; }
+
+    var orders = db.orders.slice();
+    var open = orders.filter(isOpen);
+    var done = orders.filter(function (o) { return !isOpen(o); });
+    var owed = orders.reduce(function (t, o) { return t + Math.max(0, balanceOf(o)); }, 0);
+    var first = (c.name || "").split(" ")[0];
+
+    var html =
+      '<div class="c-hero">' +
+        "<h2>Hello " + esc(first) + "</h2>" +
+        "<p>" + (open.length
+          ? open.length + (open.length === 1 ? " piece is" : " pieces are") + " being made for you."
+          : "Nothing in the workroom right now.") + "</p>" +
+      "</div>";
+
+    if (owed > 0) {
+      html += '<div class="c-balance"><span>Outstanding balance</span><strong>' + money(owed) + "</strong></div>";
+    }
+
+    if (!measurementsFilled(c)) {
+      html +=
+        '<div class="notice">Adding your measurements helps the studio cut to your exact size. ' +
+        '<button class="btn btn-subtle btn-sm" data-ctab-go="measurements" style="margin-top:6px">Add my measurements</button></div>';
+    }
+
+    html += open.length
+      ? '<h3 class="section-title">In progress</h3><div class="card-list">' + open.map(customerOrderCard).join("") + "</div>"
+      : "";
+
+    if (done.length) {
+      html += '<h3 class="section-title">Finished</h3><div class="card-list">' + done.map(customerOrderCard).join("") + "</div>";
+    }
+
+    if (!orders.length) {
+      html += '<div class="empty"><span class="empty-icon">🧵</span><h3>No orders yet</h3>' +
+        "<p>When the studio starts a piece for you it will show up here, with photos as it comes together.</p></div>";
+    }
+
+    view.innerHTML = html;
+  }
+
+  function customerOrderCard(o) {
+    var st = statusOf(o);
+    var bal = balanceOf(o);
+    return (
+      '<div class="item-card" data-open-my-order="' + o.id + '">' +
+        '<div class="card-top"><div class="card-title">' + esc(o.garment || "Order") +
+          '<span class="ref" style="margin-left:6px">' + esc(o.ref) + "</span></div>" +
+          '<div class="card-badges"><span class="pill st-' + st.key + '">' + st.label + "</span>" +
+          (o.urgent ? '<span class="badge-urgent">RUSH</span>' : "") + "</div></div>" +
+        (o.fabric ? '<div class="card-sub">' + esc(o.fabric) + "</div>" : "") +
+        '<div class="card-foot">' +
+          '<div class="progress"><div class="progress-fill' + (st.progress === 100 ? " done" : "") +
+            '" style="width:' + st.progress + '%"></div></div>' +
+          (o.dueDate ? dueBadge(o) : "") +
+        "</div>" +
+        (bal > 0 ? '<div class="card-foot"><span class="balance-chip balance-owed">' + money(bal) + " to pay</span></div>" : "") +
+      "</div>"
+    );
+  }
+
+  // The pipeline drawn as a vertical journey, so she can see where her piece
+  // has been and what is still to come rather than one status word.
+  function customerTimeline(o) {
+    if (o.status === "cancelled") {
+      return '<div class="notice" style="background:var(--red-soft);border-color:var(--red-line);color:var(--red)">This order was cancelled.</div>';
+    }
+    var at = statusIndex(o.status);
+    return '<div class="c-timeline">' + STATUSES.map(function (s, i) {
+      var cls = i < at ? "done" : i === at ? "now" : "todo";
+      return '<div class="c-step ' + cls + '"><span class="c-dot"></span>' +
+        '<div class="c-step-label">' + s.label +
+        (i === at ? '<span class="c-step-now">happening now</span>' : "") + "</div></div>";
+    }).join("") + "</div>";
+  }
+
+  function showMyOrder(id) {
+    var o = orderById(id);
+    if (!o) return;
+    var bal = balanceOf(o);
+    var paid = paidTotal(o);
+    openModal(
+      modalHead(esc(o.garment || "Order"), esc(o.ref) + (o.dueDate ? " · due " + esc(fmtDate(o.dueDate)) : "")) +
+      '<div class="modal-body">' +
+        customerTimeline(o) +
+        '<div class="detail-grid">' +
+          (o.fabric ? detail("Fabric", esc(o.fabric) + (o.fabricBy ? " (" + (o.fabricBy === "client" ? "yours" : "studio") + ")" : "")) : "") +
+          (o.orderDate ? detail("Started", esc(fmtDate(o.orderDate))) : "") +
+          (o.dueDate ? detail("Expected", esc(fmtDate(o.dueDate))) : "") +
+          (o.deliveredAt ? detail("Delivered", esc(fmtDate(o.deliveredAt))) : "") +
+          (o.description ? '<div class="full">' + detail("Style", esc(o.description)) + "</div>" : "") +
+        "</div>" +
+        (o.price > 0
+          ? '<div class="pay-summary"><span>Price ' + money(o.price) + "</span>" +
+            "<span>Paid " + money(paid) + "</span>" +
+            '<span class="' + (bal > 0 ? "balance-owed" : "balance-paid") + '">' +
+            (bal > 0 ? "Balance " + money(bal) : "Fully paid") + "</span></div>"
+          : "") +
+        photoStrip({ orderId: o.id }) +
+        '<div class="modal-actions">' +
+          '<span class="spacer"></span>' +
+          '<button class="btn btn-ghost" data-action="close-modal">Close</button>' +
+        "</div>" +
+      "</div>"
+    );
+    hydratePhotos();
+  }
+
+  /* ---------- Her measurements ---------- */
+
+  function measurementsFilled(c) {
+    var m = (c && c.measurements) || {};
+    if (m.size) return true;
+    for (var i = 0; i < MEASUREMENTS.length; i++) if (m[MEASUREMENTS[i][0]]) return true;
+    return false;
+  }
+
+  function renderCustomerMeasurements() {
+    var c = myClient();
+    var view = $("#cview-measurements");
+    if (!c) { view.innerHTML = notLinkedYet("measurements"); return; }
+
+    // What she last sent in, if the studio has not confirmed it yet, otherwise
+    // the confirmed set. Either way the form shows the newest numbers she gave.
+    var pending = c.pendingMeasurements;
+    var m = pending || c.measurements || {};
+
+    view.innerHTML =
+      '<div class="view-head"><h2>My measurements</h2></div>' +
+      (pending
+        ? '<div class="notice">Thank you. The studio is checking these over — they will be confirmed at your next fitting. You can still change them below.</div>'
+        : measurementsFilled(c)
+          ? '<div class="c-confirmed">✓ Confirmed by the studio</div>'
+          : '<div class="notice">Fill in whichever you know. A standard size on its own is plenty to start with — the studio will take the rest at your first fitting.</div>') +
+      '<form id="myMeasureForm">' +
+        '<div class="field" style="max-width:220px"><label for="my_size">Standard size</label><select id="my_size">' +
+          '<option value="">Not sure</option>' +
+          SIZES.map(function (s) {
+            return '<option value="' + s + '"' + (m.size === s ? " selected" : "") + ">" + s + "</option>";
+          }).join("") +
+        "</select></div>" +
+        '<h3 class="section-title">Detailed measurements (inches)</h3>' +
+        '<div class="measure-grid">' +
+          MEASUREMENTS.map(function (f) {
+            return '<div class="field"><label for="my_' + f[0] + '">' + f[1] + "</label>" +
+              '<input id="my_' + f[0] + '" type="number" step="any" inputmode="decimal" value="' + esc(m[f[0]] || "") + '"></div>';
+          }).join("") +
+        "</div>" +
+        '<div class="modal-actions"><span class="spacer"></span>' +
+          '<button type="submit" class="btn btn-primary">Send to the studio</button>' +
+        "</div>" +
+      "</form>";
+  }
+
+  function submitMyMeasurements() {
+    var out = {};
+    var size = $("#my_size").value;
+    if (size) out.size = size;
+    MEASUREMENTS.forEach(function (f) {
+      var v = $("#my_" + f[0]).value.trim();
+      if (v) out[f[0]] = v;
+    });
+    busy("#myMeasureForm", true);
+    sb.rpc("submit_measurements", { p_measurements: out }).then(function (res) {
+      busy("#myMeasureForm", false);
+      if (res.error) return fail(res.error, "Could not send your measurements");
+      var c = myClient();
+      if (c) { c.pendingMeasurements = out; c.pendingMeasurementsAt = new Date().toISOString(); }
+      toast("Sent to the studio ✓");
+      renderCustomer();
+    });
+  }
+
+  /* ---------- Her account ---------- */
+
+  function renderCustomerAccount() {
+    var c = myClient();
+    var view = $("#cview-account");
+    view.innerHTML =
+      '<div class="view-head"><h2>My account</h2></div>' +
+      '<div class="chart-card">' +
+        '<div class="detail-grid">' +
+          detail("Name", esc(c ? c.name : (me.fullName || "—"))) +
+          detail("Sign-in email", esc(me.email)) +
+          (c && c.phone ? detail("Phone", esc(c.phone)) : "") +
+          (c && c.address ? '<div class="full">' + detail("Address", esc(c.address)) + "</div>" : "") +
+        "</div>" +
+        '<div class="hint" style="margin-top:10px">To correct any of these, send the studio a message and they will update it for you.</div>' +
+      "</div>" +
+      themeToggle() +
+      '<div class="modal-actions"><span class="spacer"></span>' +
+        '<button class="btn btn-danger" data-action="sign-out">Sign Out</button>' +
+      "</div>";
+  }
+
+  function switchCustomerTab(tab) {
+    cui.tab = tab;
+    $all("[data-ctab]").forEach(function (t) { t.classList.toggle("active", t.getAttribute("data-ctab") === tab); });
+    $all("#customerApp .view").forEach(function (v) { v.classList.toggle("active", v.id === "cview-" + tab); });
+  }
+
   /* ============================================================
      RENDERING
      ============================================================ */
@@ -464,8 +761,11 @@
     $all("[data-needs-edit]").forEach(function (el) { el.style.display = canEdit() ? "" : "none"; });
     $("#analyticsTab").hidden = !isAdmin();
     $("#invoicesTab").hidden = !isAdmin();
-    // unmissable badge when people are waiting to be let in
-    var waiting = isAdmin() ? db.profiles.filter(function (p) { return p.role === "pending"; }).length : 0;
+    // unmissable badge when people are waiting to be let in, or a client has
+    // signed up and is still waiting to be connected to her records
+    var waiting = isAdmin()
+      ? db.profiles.filter(function (p) { return p.role === "pending"; }).length + unlinkedCustomers().length
+      : 0;
     $("#menuBtn").innerHTML = "&#9881; Menu" +
       (waiting ? ' <span class="menu-badge">' + waiting + "</span>" : "");
     renderDashboard();
@@ -2381,7 +2681,9 @@
 
   function goBackTo(key) {
     var id = key.slice(key.indexOf(":") + 1);
-    if (key.indexOf("order:") === 0) showOrderDetail(id);
+    // a customer viewing her own order photos comes back to her screen, not
+    // the studio's order detail
+    if (key.indexOf("order:") === 0) { if (isCustomer()) showMyOrder(id); else showOrderDetail(id); }
     else if (key.indexOf("client:") === 0) showClientDetail(id);
     else showItemDetail(id);
   }
@@ -2542,6 +2844,7 @@
           : '<p style="color:var(--muted);font-size:13px;margin:6px 0 10px">🔒 Contact details are visible to the Admin only.</p>') +
         (isAdmin() && c.address ? '<div class="detail-item"><div class="dt">Address</div><div class="dd">' + esc(c.address) + "</div></div>" : "") +
         (c.notes ? '<div class="detail-item" style="margin-top:8px"><div class="dt">Style notes</div><div class="dd">' + esc(c.notes) + "</div></div>" : "") +
+        measurementReviewBlock(c) +
         '<h3 class="section-title">📏 Size &amp; Measurements</h3>' +
         (m.size ? '<div class="size-badge">Size <strong>' + esc(m.size) + "</strong></div>" : "") +
         (tiles ? '<div class="measure-view">' + tiles + "</div>" : "") +
@@ -2980,6 +3283,8 @@
 
         pendingBlock +
 
+        customerSignupBlock() +
+
         themeToggle() +
 
         '<h3 class="section-title">👥 Team</h3>' +
@@ -3011,6 +3316,126 @@
       db.settings.currency = cur;
       renderAll();
       toast("Settings saved ✓");
+    });
+  }
+
+  /* ---------- Connecting a client's sign-in to her record ---------- */
+
+  // Signed up as a client but not yet joined to a client record, so the
+  // database is still returning her nothing.
+  function unlinkedCustomers() {
+    return db.profiles.filter(function (p) {
+      if (p.role !== "customer") return false;
+      return !db.clients.some(function (c) { return c.userId === p.id; });
+    });
+  }
+
+  function customerSignupBlock() {
+    var waiting = unlinkedCustomers();
+    if (!isAdmin() || !waiting.length) return "";
+    var free = db.clients.filter(function (c) { return !c.userId; });
+
+    return (
+      '<h3 class="section-title">🔗 Client sign-ups (' + waiting.length + ")</h3>" +
+      '<p class="hint" style="margin-bottom:8px">Connect each one to her record so she sees her own orders and nothing else. ' +
+      "If she is new to the studio, choose <em>Create a new client</em>. Only connect people you recognise.</p>" +
+      waiting.map(function (p) {
+        return (
+          '<div class="pending-row">' +
+            '<div class="t-name">' + esc(p.fullName || "(no name)") + "</div>" +
+            '<div class="t-email">' + esc(p.email) + "</div>" +
+            '<div class="pending-actions">' +
+              '<select data-link-to="' + p.id + '">' +
+                '<option value="__new__">Create a new client</option>' +
+                free.map(function (c) {
+                  return '<option value="' + c.id + '">' + esc(c.name) + "</option>";
+                }).join("") +
+              "</select>" +
+              '<button class="btn btn-primary btn-sm" data-link-customer="' + p.id + '">Connect</button>' +
+              '<button class="btn btn-danger btn-sm" data-delete-user="' + p.id + '">Reject</button>' +
+            "</div>" +
+          "</div>"
+        );
+      }).join("")
+    );
+  }
+
+  function linkCustomer(userId) {
+    if (!isAdmin()) return;
+    var sel = $('[data-link-to="' + userId + '"]');
+    var choice = sel ? sel.value : "";
+    var p = null;
+    db.profiles.forEach(function (x) { if (x.id === userId) p = x; });
+    if (!p || !choice) { toast("Choose who this is first", true); return; }
+
+    var who = p.fullName || p.email;
+    var target = choice === "__new__" ? "a new client record" : "“" + clientName(choice) + "”";
+    if (!confirm("Connect " + who + " to " + target + "? She will be able to see that client's orders, measurements and balances.")) return;
+
+    function done() {
+      toast(who + " is connected ✓");
+      loadAll().then(function () { renderAll(); showSettings(); });
+    }
+
+    if (choice === "__new__") {
+      sb.from("clients").insert({ name: p.fullName || p.email, user_id: userId })
+        .select(CLIENT_COLS).single().then(function (res) {
+          if (res.error) return fail(res.error, "Could not create the client record");
+          done();
+        });
+      return;
+    }
+    sb.from("clients").update({ user_id: userId }).eq("id", choice)
+      .select(CLIENT_COLS).single().then(function (res) {
+        if (res.error) return fail(res.error, "Could not connect that client");
+        done();
+      });
+  }
+
+  // She sent measurements in; they wait here until the studio confirms them,
+  // so a number typed wrong at home never reaches the cutting table on its own.
+  function measurementReviewBlock(c) {
+    if (!c.pendingMeasurements || !canEdit()) return "";
+    var m = c.pendingMeasurements, old = c.measurements || {};
+    var rows = [];
+    if (m.size && m.size !== old.size) rows.push(["Standard size", old.size || "—", m.size]);
+    MEASUREMENTS.forEach(function (f) {
+      if (m[f[0]] && String(m[f[0]]) !== String(old[f[0]] || "")) {
+        rows.push([f[1], old[f[0]] || "—", m[f[0]]]);
+      }
+    });
+    return (
+      '<div class="notice" style="margin-top:14px">' +
+        "<strong>" + esc(c.name.split(" ")[0]) + " sent in measurements</strong>" +
+        (c.pendingMeasurementsAt ? " · " + esc(fmtDate(c.pendingMeasurementsAt)) : "") +
+        (rows.length
+          ? '<table class="pay-table" style="margin-top:6px">' + rows.map(function (r) {
+              return "<tr><td>" + esc(r[0]) + '</td><td style="text-align:right">' +
+                esc(r[1]) + " → <strong>" + esc(r[2]) + "</strong></td></tr>";
+            }).join("") + "</table>"
+          : "<p>Nothing differs from what you already have on file.</p>") +
+        '<div class="pending-actions">' +
+          '<button class="btn btn-primary btn-sm" data-accept-measurements="' + c.id + '">Accept</button>' +
+          '<button class="btn btn-ghost btn-sm" data-discard-measurements="' + c.id + '">Discard</button>' +
+        "</div>" +
+      "</div>"
+    );
+  }
+
+  function reviewMeasurements(clientId, accept) {
+    var c = clientById(clientId);
+    if (!c || !canEdit() || !c.pendingMeasurements) return;
+    var patch = { pending_measurements: null, pending_measurements_at: null };
+    if (accept) patch.measurements = c.pendingMeasurements;
+    sb.from("clients").update(patch).eq("id", clientId).select(CLIENT_COLS).single().then(function (res) {
+      if (res.error) return fail(res.error, "Could not update measurements");
+      var saved = rowToClient(res.data);
+      // contact columns never come back for non-admins; carry them over
+      saved.phone = c.phone; saved.email = c.email; saved.address = c.address;
+      db.clients = db.clients.map(function (x) { return x.id === saved.id ? saved : x; });
+      toast(accept ? "Measurements accepted ✓" : "Discarded");
+      renderAll();
+      showClientDetail(clientId);
     });
   }
 
@@ -3076,7 +3501,7 @@
   document.addEventListener("click", function (e) {
     var t = e.target;
 
-    var el = t.closest("[data-tab],[data-action],[data-order-filter],[data-open-order],[data-open-client],[data-advance-order],[data-edit-client],[data-delete-client],[data-new-order-for],[data-edit-order],[data-delete-order],[data-set-status],[data-del-payment],[data-print-order],[data-modal-overlay],[data-an-shift],[data-delete-user],[data-inv-cat],[data-open-item],[data-edit-item],[data-delete-item],[data-stock-in],[data-stock-out],[data-add-photo],[data-open-photo],[data-delete-photo],[data-back-to],[data-open-invoice],[data-invoice-order],[data-invoice-client],[data-pick-invoice-client],[data-add-line],[data-del-line],[data-delete-invoice],[data-invoice-paid],[data-invoice-unpaid],[data-download-invoice],[data-approve-user],[data-theme-set],[data-share-image],[data-image-invoice],[data-lb-step]");
+    var el = t.closest("[data-tab],[data-action],[data-order-filter],[data-open-order],[data-open-client],[data-advance-order],[data-edit-client],[data-delete-client],[data-new-order-for],[data-edit-order],[data-delete-order],[data-set-status],[data-del-payment],[data-print-order],[data-modal-overlay],[data-an-shift],[data-delete-user],[data-inv-cat],[data-open-item],[data-edit-item],[data-delete-item],[data-stock-in],[data-stock-out],[data-add-photo],[data-open-photo],[data-delete-photo],[data-back-to],[data-open-invoice],[data-invoice-order],[data-invoice-client],[data-pick-invoice-client],[data-add-line],[data-del-line],[data-delete-invoice],[data-invoice-paid],[data-invoice-unpaid],[data-download-invoice],[data-approve-user],[data-theme-set],[data-share-image],[data-image-invoice],[data-lb-step],[data-ctab],[data-ctab-go],[data-open-my-order],[data-signup-as],[data-link-customer],[data-accept-measurements],[data-discard-measurements]");
     if (!el) return;
 
     if (el.hasAttribute("data-theme-set")) { setTheme(el.getAttribute("data-theme-set")); return; }
@@ -3111,6 +3536,20 @@
     if (el.hasAttribute("data-invoice-unpaid")) { setInvoicePaid(el.getAttribute("data-invoice-unpaid"), false); return; }
 
     if (el.hasAttribute("data-lb-step")) { lbStep(Number(el.getAttribute("data-lb-step"))); return; }
+
+    /* ---- customer portal ---- */
+    if (el.hasAttribute("data-ctab")) { switchCustomerTab(el.getAttribute("data-ctab")); return; }
+    if (el.hasAttribute("data-ctab-go")) { switchCustomerTab(el.getAttribute("data-ctab-go")); return; }
+    if (el.hasAttribute("data-open-my-order")) { showMyOrder(el.getAttribute("data-open-my-order")); return; }
+    if (el.hasAttribute("data-signup-as")) {
+      $all("[data-signup-as]").forEach(function (b) {
+        b.setAttribute("aria-pressed", b === el ? "true" : "false");
+      });
+      return;
+    }
+    if (el.hasAttribute("data-link-customer")) { linkCustomer(el.getAttribute("data-link-customer")); return; }
+    if (el.hasAttribute("data-accept-measurements")) { reviewMeasurements(el.getAttribute("data-accept-measurements"), true); return; }
+    if (el.hasAttribute("data-discard-measurements")) { reviewMeasurements(el.getAttribute("data-discard-measurements"), false); return; }
     if (el.hasAttribute("data-add-photo")) { showPhotoUpload(el.getAttribute("data-add-photo")); return; }
     if (el.hasAttribute("data-open-photo")) { showPhotoLightbox(el.getAttribute("data-open-photo")); return; }
     if (el.hasAttribute("data-delete-photo")) { deletePhoto(el.getAttribute("data-delete-photo")); return; }
@@ -3206,6 +3645,7 @@
       case "new-invoice": showInvoiceBuilder({}); break;
       case "invoice-settings": showInvoiceSettings(); break;
       case "open-settings": showSettings(); break;
+      case "customer-menu": switchCustomerTab("account"); break;
       case "export-data": exportData(); break;
       case "sign-out": e.preventDefault(); signOut(); break;
       case "recheck-approval":
@@ -3283,6 +3723,7 @@
     else if (form.id === "signinForm") { e.preventDefault(); doSignIn(form); }
     else if (form.id === "signupForm") { e.preventDefault(); doSignUp(form); }
     else if (form.id === "settingsForm") { e.preventDefault(); saveSettings(); }
+    else if (form.id === "myMeasureForm") { e.preventDefault(); submitMyMeasurements(); }
     else if (form.id === "paymentForm") {
       e.preventDefault();
       if (!isAdmin()) return;
