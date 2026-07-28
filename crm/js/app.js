@@ -16,7 +16,7 @@
   // Shown at the bottom of the Menu and of a client's Account tab. When
   // something looks like it did not ship, this says whether the phone is
   // actually running the new copy. Keep it in step with the ?v= in index.html.
-  var APP_VERSION = "20260728c";
+  var APP_VERSION = "20260728d";
 
   /* ---------- Domain constants ---------- */
 
@@ -569,7 +569,10 @@
       sb.from("orders").select(ORDER_COLS).order("created_at", { ascending: false }),
       sb.from("order_money").select("*"),
       sb.from("photos").select("*").order("created_at"),
-      sb.from("client_contacts").select("*")
+      sb.from("client_contacts").select("*"),
+      // only invoices raised against her, and the bank details printed on them
+      sb.from("invoices").select("*").order("created_at", { ascending: false }),
+      sb.from("invoice_settings").select("*")
     ]).then(function (res) {
       var errs = res.filter(function (r) { return r.error; });
       if (errs.length) throw errs[0].error;
@@ -589,6 +592,8 @@
         var k = contacts[c.id];
         if (k) { c.phone = k.phone || ""; c.email = k.email || ""; c.address = k.address || ""; }
       });
+      db.invoices = (res[6].data || []).map(rowToInvoice);
+      db.invoiceSettings = rowToInvSettings((res[7].data || [])[0]);
     });
   }
 
@@ -647,7 +652,6 @@
     if (!measurementsFilled(c)) {
       html +=
         '<div class="c-prompt">' +
-          '<div class="c-prompt-icon" aria-hidden="true">📏</div>' +
           '<div class="c-prompt-body">' +
             "<h4>Add your measurements</h4>" +
             "<p>So the studio can cut to your exact size. A standard size on its own is enough to start with.</p>" +
@@ -662,6 +666,11 @@
 
     if (done.length) {
       html += '<h3 class="section-title">Finished</h3><div class="card-list">' + done.map(customerOrderCard).join("") + "</div>";
+    }
+
+    if (db.invoices.length) {
+      html += '<h3 class="section-title">Invoices</h3>' +
+        '<div class="card-list">' + db.invoices.map(customerInvoiceCard).join("") + "</div>";
     }
 
     if (!orders.length) {
@@ -697,6 +706,10 @@
           '<div class="field"><label for="rq_due">Needed by</label>' +
             '<input id="rq_due" type="date" min="' + todayISO() + '"></div>' +
         "</div>" +
+        '<div class="field" style="margin-top:10px"><label for="rq_photo">A picture, if you have one</label>' +
+          '<input id="rq_photo" type="file" accept="image/*">' +
+          '<div class="hint">Something you have seen and liked, or your fabric. It reaches the tailor with the order, so there is less to describe in words.</div></div>' +
+        '<img id="rq_preview" class="photo-preview" hidden alt="The picture you chose">' +
         '<div class="hint" style="margin-top:8px">Nothing is confirmed until the studio accepts it, and no price is set yet.</div>' +
         '<div class="modal-actions"><span class="spacer"></span>' +
           '<button type="button" class="btn btn-ghost" data-action="close-modal">Cancel</button>' +
@@ -706,10 +719,34 @@
     );
   }
 
+  // Her picture goes up after the order exists, because the storage rules ask
+  // whether the path sits inside one of her own orders.
+  function attachRequestPhoto(orderId, file) {
+    return compressImage(file).then(function (blob) {
+      var path = "orders/" + orderId + "/" + randId() + ".jpg";
+      return sb.storage.from("photos").upload(path, blob, { contentType: "image/jpeg" });
+    }).then(function (up) {
+      if (up.error) throw up.error;
+      return sb.from("photos").insert({
+        path: up.data.path, kind: "style", caption: "Sent with the order",
+        order_id: orderId, created_by: myUserId
+      });
+    }).then(function (ins) { if (ins.error) throw ins.error; });
+  }
+
   function submitRequest() {
     var garment = $("#rq_garment").value.trim();
     if (!garment) { toast("Please say what you would like made", true); return; }
+    var file = $("#rq_photo").files[0];
     busy("#requestForm", true);
+
+    function finish(warning) {
+      busy("#requestForm", false);
+      closeModal();
+      toast(warning || "Sent ✓ The studio will be in touch", !!warning);
+      loadCustomer().then(renderCustomer);
+    }
+
     sb.rpc("request_order", {
       p_garment: garment,
       p_description: $("#rq_desc").value.trim(),
@@ -717,11 +754,15 @@
       p_fabric_by: $("#rq_fabricby").value,
       p_due: $("#rq_due").value || null
     }).then(function (res) {
-      busy("#requestForm", false);
-      if (res.error) return fail(res.error, "Could not send your request");
-      closeModal();
-      toast("Sent ✓ The studio will be in touch");
-      loadCustomer().then(renderCustomer);
+      if (res.error) { busy("#requestForm", false); return fail(res.error, "Could not send your order"); }
+      var made = res.data || {};
+      if (!file || !made.id) { finish(); return; }
+      // The order is already placed by now, so a picture that fails to upload
+      // must not read as the whole thing having failed.
+      attachRequestPhoto(made.id, file).then(function () { finish(); }).catch(function (e) {
+        if (window.console && console.error) console.error("photo upload", e);
+        finish("Your order was sent, but the picture did not upload. You can send it to the studio directly.");
+      });
     });
   }
 
@@ -746,6 +787,20 @@
               (o.dueDate ? dueBadge(o) : "") +
             "</div>") +
         (bal > 0 ? '<div class="card-foot"><span class="balance-chip balance-owed">' + money(bal) + " to pay</span></div>" : "") +
+      "</div>"
+    );
+  }
+
+  function customerInvoiceCard(v) {
+    return (
+      '<div class="item-card" data-open-invoice="' + v.id + '">' +
+        '<div class="card-top"><div class="card-title">' + esc(v.number) + "</div>" +
+          '<div class="card-badges">' + invStatusPill(v) + "</div></div>" +
+        '<div class="card-sub">' + esc(fmtDate(v.issueDate)) +
+          (v.dueDate ? " · to pay by " + esc(fmtDate(v.dueDate)) : "") + "</div>" +
+        '<div class="card-foot"><span class="spacer"></span>' +
+          '<span class="balance-chip ' + (v.balance > 0 ? "balance-owed" : "balance-paid") + '">' +
+          (v.balance > 0 ? money(v.balance) + " to pay" : "Paid in full") + "</span></div>" +
       "</div>"
     );
   }
@@ -1806,7 +1861,9 @@
 
   function showInvoiceDoc(id) {
     var v = invoiceById(id);
-    if (!v || !isAdmin()) return;
+    // A client sees the same document for her own invoice; the database only
+    // ever hands her hers. The buttons below differ by who is looking.
+    if (!v || (!isAdmin() && !isCustomer())) return;
     var s = db.invoiceSettings || {};
     var wa = phoneDigits(v.clientPhone);
 
@@ -1865,19 +1922,23 @@
           '<div class="inv-thanks">Thank you for your patronage.</div>' +
         "</div>" +
 
-        (payBlock ? "" :
-          '<div class="notice no-print" style="margin-top:12px">Your bank account is not set, so clients cannot see where to pay. ' +
-          '<button class="btn btn-subtle btn-sm" data-action="invoice-settings" style="margin-top:6px">Set it now</button></div>') +
+        (isAdmin() && !payBlock
+          ? '<div class="notice no-print" style="margin-top:12px">Your bank account is not set, so clients cannot see where to pay. ' +
+            '<button class="btn btn-subtle btn-sm" data-action="invoice-settings" style="margin-top:6px">Set it now</button></div>'
+          : "") +
 
         '<div class="modal-actions no-print">' +
           '<button class="btn btn-ghost btn-sm" data-download-invoice="' + v.id + '">⬇ Download PDF</button>' +
           '<button class="btn btn-ghost btn-sm" data-image-invoice="' + v.id + '">🖼 Save image</button>' +
           '<button class="btn btn-ghost btn-sm" data-print-order>🖨 Print</button>' +
-          '<button class="btn btn-ghost btn-sm" data-delete-invoice="' + v.id + '">Delete</button>' +
-          (v.status !== "paid"
-            ? '<button class="btn btn-ghost btn-sm" data-invoice-paid="' + v.id + '">✓ Mark paid</button>'
-            : '<button class="btn btn-ghost btn-sm" data-invoice-unpaid="' + v.id + '">Mark unpaid</button>') +
-          '<button class="btn btn-primary" data-share-image="' + v.id + '">Send image on WhatsApp</button>' +
+          (isAdmin()
+            ? '<button class="btn btn-ghost btn-sm" data-delete-invoice="' + v.id + '">Delete</button>' +
+              (v.status !== "paid"
+                ? '<button class="btn btn-ghost btn-sm" data-invoice-paid="' + v.id + '">✓ Mark paid</button>'
+                : '<button class="btn btn-ghost btn-sm" data-invoice-unpaid="' + v.id + '">Mark unpaid</button>') +
+              '<button class="btn btn-primary" data-share-image="' + v.id + '">Send image on WhatsApp</button>'
+            : '<span class="spacer"></span>' +
+              '<button class="btn btn-ghost" data-action="close-modal">Close</button>') +
         "</div>" +
       "</div>"
     );
@@ -4033,9 +4094,9 @@
       return;
     }
 
-    if (e.target.id === "ph_file") {
+    if (e.target.id === "ph_file" || e.target.id === "rq_photo") {
       var f = e.target.files[0];
-      var prev = $("#ph_preview");
+      var prev = $(e.target.id === "ph_file" ? "#ph_preview" : "#rq_preview");
       if (f && prev) {
         var r = new FileReader();
         r.onload = function () { prev.src = r.result; prev.hidden = false; };
