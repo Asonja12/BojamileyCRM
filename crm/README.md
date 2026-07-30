@@ -122,8 +122,8 @@ Internet is required since data lives in the cloud.
     zero is a domestic trunk prefix and has to be dropped when dialling from
     abroad; keeping it is the usual way to end up with a number WhatsApp cannot
     reach. The number it will actually use is shown back to her as she types.
-    Studio accounts can leave it blank. When the Admin connects her to a brand
-    new client, the number comes across with her.
+    Studio sign-ups are not asked for a number at all. When the Admin connects
+    her to a brand new client, the number comes across with her.
   - Nothing is visible to them until an Admin connects the sign-in to a client
     record, either an existing client or a new one. New sign-ups wait at the top of the **Dashboard** under *New
     client sign-ups*, and that section disappears once none are waiting.
