@@ -1077,6 +1077,11 @@ input[type="date"]::-webkit-datetime-edit { padding: 0; }
 
 .seg-btn:hover { color: var(--ink); }
 
+/* country beside the number, and neither allowed to bully the other */
+.phone-row { display: flex; gap: 8px; }
+.phone-row select { flex: 1 1 40%; min-width: 0; max-width: 46%; }
+.phone-row input { flex: 1 1 60%; min-width: 0; }
+
 .seg-btn[aria-pressed="true"] {
   background: var(--surface);
   color: var(--accent-dark);

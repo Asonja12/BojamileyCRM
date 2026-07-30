@@ -16,7 +16,7 @@
   // Shown at the bottom of the Menu and of a client's Account tab. When
   // something looks like it did not ship, this says whether the phone is
   // actually running the new copy. Keep it in step with the ?v= in index.html.
-  var APP_VERSION = "20260728g";
+  var APP_VERSION = "20260728h";
 
   /* ---------- Domain constants ---------- */
 
@@ -59,6 +59,41 @@
     ["ankle", "Ankle / Bottom"],
     ["neck", "Neck"],
     ["wrist", "Wrist"]
+  ];
+
+  // Dial codes for the sign-up screen: all of Africa, plus where the studio's
+  // clients actually live abroad. Nigeria first because it is the default.
+  var COUNTRIES = [
+    ["NG", "Nigeria", "234"],
+    ["GH", "Ghana", "233"], ["KE", "Kenya", "254"], ["ZA", "South Africa", "27"],
+    ["EG", "Egypt", "20"], ["TZ", "Tanzania", "255"], ["UG", "Uganda", "256"],
+    ["RW", "Rwanda", "250"], ["ET", "Ethiopia", "251"], ["SN", "Senegal", "221"],
+    ["CI", "Côte d’Ivoire", "225"], ["CM", "Cameroon", "237"], ["ZM", "Zambia", "260"],
+    ["ZW", "Zimbabwe", "263"], ["BW", "Botswana", "267"], ["NA", "Namibia", "264"],
+    ["MW", "Malawi", "265"], ["MZ", "Mozambique", "258"], ["AO", "Angola", "244"],
+    ["GA", "Gabon", "241"], ["TG", "Togo", "228"], ["BJ", "Benin", "229"],
+    ["BF", "Burkina Faso", "226"], ["ML", "Mali", "223"], ["NE", "Niger", "227"],
+    ["GN", "Guinea", "224"], ["SL", "Sierra Leone", "232"], ["LR", "Liberia", "231"],
+    ["GM", "Gambia", "220"], ["CV", "Cape Verde", "238"], ["CD", "DR Congo", "243"],
+    ["CG", "Congo", "242"], ["SD", "Sudan", "249"], ["SS", "South Sudan", "211"],
+    ["SO", "Somalia", "252"], ["DZ", "Algeria", "213"], ["MA", "Morocco", "212"],
+    ["TN", "Tunisia", "216"], ["LY", "Libya", "218"], ["MU", "Mauritius", "230"],
+    ["GB", "United Kingdom", "44"], ["US", "United States", "1"], ["CA", "Canada", "1"],
+    ["IE", "Ireland", "353"], ["DE", "Germany", "49"], ["FR", "France", "33"],
+    ["IT", "Italy", "39"], ["ES", "Spain", "34"], ["NL", "Netherlands", "31"],
+    ["BE", "Belgium", "32"], ["PT", "Portugal", "351"], ["SE", "Sweden", "46"],
+    ["NO", "Norway", "47"], ["DK", "Denmark", "45"], ["FI", "Finland", "358"],
+    ["CH", "Switzerland", "41"], ["AT", "Austria", "43"], ["PL", "Poland", "48"],
+    ["GR", "Greece", "30"], ["TR", "Türkiye", "90"],
+    ["AE", "United Arab Emirates", "971"], ["SA", "Saudi Arabia", "966"],
+    ["QA", "Qatar", "974"], ["KW", "Kuwait", "965"], ["OM", "Oman", "968"],
+    ["BH", "Bahrain", "973"], ["LB", "Lebanon", "961"], ["JO", "Jordan", "962"],
+    ["CN", "China", "86"], ["IN", "India", "91"], ["PK", "Pakistan", "92"],
+    ["BD", "Bangladesh", "880"], ["JP", "Japan", "81"], ["KR", "South Korea", "82"],
+    ["MY", "Malaysia", "60"], ["SG", "Singapore", "65"], ["ID", "Indonesia", "62"],
+    ["PH", "Philippines", "63"], ["TH", "Thailand", "66"], ["HK", "Hong Kong", "852"],
+    ["AU", "Australia", "61"], ["NZ", "New Zealand", "64"], ["BR", "Brazil", "55"],
+    ["MX", "Mexico", "52"]
   ];
 
   var ROLES = [
@@ -209,6 +244,41 @@
     return String(phone || "").replace(/[^\d+]/g, "").replace(/^\+/, "");
   }
 
+  // "0803 123 4567" with Nigeria chosen becomes "+2348031234567".
+  //
+  // The leading zero is the point of this. It is a domestic trunk prefix: you
+  // dial it from inside the country and drop it from outside. Gluing a country
+  // code onto the front of what she typed gives +2340803..., a number WhatsApp
+  // cannot reach, and nobody finds out until a message goes nowhere.
+  function toE164(dial, national) {
+    var raw = String(national || "").trim();
+    var digits = raw.replace(/\D/g, "");
+    if (!digits) return "";
+    // She pasted the whole international number. Take it as given rather than
+    // gluing the country code on a second time.
+    if (raw.charAt(0) === "+") return "+" + digits;
+    // Same thing dialled the old way, 00 standing in for the plus.
+    if (digits.indexOf("00") === 0) return "+" + digits.slice(2);
+    return "+" + String(dial).replace(/\D/g, "") + digits.replace(/^0+/, "");
+  }
+
+  // E.164 allows 15 digits including the country code; below eight is a typo.
+  function phoneLooksRight(e164) {
+    var d = String(e164 || "").replace(/\D/g, "");
+    return d.length >= 8 && d.length <= 15;
+  }
+
+  function dialFor(iso) {
+    for (var i = 0; i < COUNTRIES.length; i++) if (COUNTRIES[i][0] === iso) return COUNTRIES[i][2];
+    return "234";
+  }
+
+  function signupPhone() {
+    var sel = $("#su_country"), inp = $("#su_phone");
+    if (!sel || !inp) return "";
+    return toE164(dialFor(sel.value), inp.value);
+  }
+
   function toast(msg, isError) {
     var root = $("#toastRoot");
     var el = document.createElement("div");
@@ -310,7 +380,10 @@
   }
 
   function rowToProfile(r) {
-    return { id: r.id, email: r.email, fullName: r.full_name, role: r.role, createdAt: r.created_at };
+    return {
+      id: r.id, email: r.email, fullName: r.full_name, role: r.role,
+      phone: r.phone || "", createdAt: r.created_at
+    };
   }
 
   function rowToItem(r) {
@@ -505,6 +578,25 @@
   function doSignUp(form) {
     var btn = $("#signupBtn"), err = $("#signupError"), info = $("#signupInfo");
     err.hidden = true; info.hidden = true;
+
+    var phone = signupPhone();
+    if (signupAs() === "customer") {
+      if (!phone) {
+        err.textContent = "Please add your phone number — the studio reaches you on WhatsApp.";
+        err.hidden = false;
+        return;
+      }
+      if (!phoneLooksRight(phone)) {
+        err.textContent = "That phone number does not look complete. Enter it as you would dial it at home, without the country code.";
+        err.hidden = false;
+        return;
+      }
+    } else if (phone && !phoneLooksRight(phone)) {
+      err.textContent = "That phone number does not look complete. Leave it blank if you would rather not give one.";
+      err.hidden = false;
+      return;
+    }
+
     btn.disabled = true; btn.textContent = "Creating account…";
     sb.auth.signUp({
       email: $("#su_email").value.trim(),
@@ -512,7 +604,7 @@
       // account_type is self-declared, which is safe because the database only
       // ever reads it to grant *less* than the default: "customer" sees one
       // client record, where the default "pending" is still nothing at all.
-      options: { data: { full_name: $("#su_name").value.trim(), account_type: signupAs() } }
+      options: { data: { full_name: $("#su_name").value.trim(), account_type: signupAs(), phone: phone } }
     }).then(function (res) {
       if (res.error) {
         err.textContent = friendlyError(res.error) || "Could not create your account. Please try again.";
@@ -541,6 +633,34 @@
   function signupAs() {
     var on = $('[data-signup-as][aria-pressed="true"]');
     return on ? on.getAttribute("data-signup-as") : "customer";
+  }
+
+  function fillCountries() {
+    var sel = $("#su_country");
+    if (!sel || sel.options.length) return;
+    sel.innerHTML = COUNTRIES.map(function (c) {
+      return '<option value="' + c[0] + '"' + (c[0] === "NG" ? " selected" : "") +
+        ">" + esc(c[1]) + " +" + c[2] + "</option>";
+    }).join("");
+  }
+
+  // The studio needs a client's number to reach her on WhatsApp; someone who
+  // works there is already in the building, so it stays optional for them.
+  function syncSignupPhone() {
+    var asClient = signupAs() === "customer";
+    var label = $('label[for="su_phone"]');
+    var inp = $("#su_phone");
+    var hint = $("#su_phoneHint");
+    if (!inp || !hint) return;
+    if (label) label.textContent = asClient ? "Phone number *" : "Phone number (optional)";
+    var built = signupPhone();
+    hint.textContent = built
+      ? (phoneLooksRight(built)
+          ? "The studio will message you on " + built
+          : "That does not look like a complete number yet")
+      : (asClient
+          ? "So the studio can reach you on WhatsApp about your order."
+          : "Optional for studio accounts.");
   }
 
   /* ============================================================
@@ -3770,7 +3890,8 @@
         return (
           '<div class="pending-row">' +
             '<div class="t-name">' + esc(p.fullName || "(no name)") + "</div>" +
-            '<div class="t-email">' + esc(p.email) + "</div>" +
+            '<div class="t-email">' + esc(p.email) +
+              (p.phone ? " · " + esc(p.phone) : "") + "</div>" +
             '<div class="pending-actions">' +
               '<select data-link-to="' + p.id + '">' +
                 '<option value="__new__">Create a new client</option>' +
@@ -3848,8 +3969,11 @@
     }
 
     if (choice === "__new__") {
-      sb.from("clients").insert({ name: p.fullName || p.email, user_id: userId })
-        .select(CLIENT_COLS).single().then(function (res) {
+      // carry over the number she gave at sign-up, so WhatsApp works from the
+      // moment she is connected rather than after someone retypes it
+      sb.from("clients").insert({
+        name: p.fullName || p.email, user_id: userId, phone: p.phone || ""
+      }).select(CLIENT_COLS).single().then(function (res) {
           if (res.error) return fail(res.error, "Could not create the client record");
           done();
         });
@@ -4028,6 +4152,7 @@
       $all("[data-signup-as]").forEach(function (b) {
         b.setAttribute("aria-pressed", b === el ? "true" : "false");
       });
+      syncSignupPhone();
       return;
     }
     if (el.hasAttribute("data-approve-request")) { e.stopPropagation(); approveRequest(el.getAttribute("data-approve-request")); return; }
@@ -4147,6 +4272,8 @@
         $("#signinForm").hidden = true;
         $("#signupForm").hidden = false;
         $("#authSub").textContent = "Create your account";
+        fillCountries();
+        syncSignupPhone();
         break;
       case "show-signin":
         e.preventDefault();
@@ -4158,6 +4285,7 @@
   });
 
   document.addEventListener("change", function (e) {
+    if (e.target.id === "su_country") syncSignupPhone();
     var el = e.target.closest("[data-role-for]");
     if (el && isAdmin()) changeRole(el.getAttribute("data-role-for"), el.value);
 
@@ -4229,6 +4357,7 @@
   });
 
   document.addEventListener("input", function (e) {
+    if (e.target.id === "su_phone") { syncSignupPhone(); return; }
     if (e.target.id === "orderSearch") { ui.orderSearch = e.target.value; renderOrdersPreservingFocus(); }
     else if (e.target.id === "clientSearch") { ui.clientSearch = e.target.value; renderClientsPreservingFocus(); }
     else if (e.target.id === "invSearch") { ui.invSearch = e.target.value; renderInvPreservingFocus(); }

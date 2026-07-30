@@ -26,7 +26,7 @@
   <!-- ?v= is bumped whenever these change. index.html itself is served
        no-cache (see _headers), so a new version number here is a URL the
        browser has never seen and cannot serve a stale copy of. -->
-  <link rel="stylesheet" href="css/crm.css?v=20260728g">
+  <link rel="stylesheet" href="css/crm.css?v=20260728h">
 </head>
 <body>
 
@@ -64,6 +64,14 @@
           <input id="su_name" type="text" required autocomplete="name" placeholder="e.g. Asonja Taiwo"></div>
         <div class="field"><label for="su_email">Email</label>
           <input id="su_email" type="email" required autocomplete="email"></div>
+        <div class="field" id="su_phoneField">
+          <label for="su_phone">Phone number</label>
+          <div class="phone-row">
+            <select id="su_country" aria-label="Country"></select>
+            <input id="su_phone" type="tel" inputmode="tel" autocomplete="tel-national" placeholder="0803 123 4567">
+          </div>
+          <div class="hint" id="su_phoneHint"></div>
+        </div>
         <div class="field"><label for="su_password">Password (min 6 characters)</label>
           <input id="su_password" type="password" required minlength="6" autocomplete="new-password"></div>
         <p class="auth-error" id="signupError" hidden></p>
@@ -164,6 +172,6 @@
        "Download PDF" ever needs it. app.js fetches it on demand. -->
   <script src="js/supabase.js"></script>
   <script src="js/config.js"></script>
-  <script src="js/app.js?v=20260728g"></script>
+  <script src="js/app.js?v=20260728h"></script>
 </body>
 </html>
