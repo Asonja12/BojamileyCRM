@@ -16,7 +16,7 @@
   // Shown at the bottom of the Menu and of a client's Account tab. When
   // something looks like it did not ship, this says whether the phone is
   // actually running the new copy. Keep it in step with the ?v= in index.html.
-  var APP_VERSION = "20260728i";
+  var APP_VERSION = "20260728j";
 
   /* ---------- Domain constants ---------- */
 
@@ -655,11 +655,11 @@
     field.hidden = !asClient;
     if (!asClient) { inp.value = ""; hint.textContent = ""; return; }
 
-    // Just the number it will use, so she can check it. No explanation: she
-    // knows why a tailor wants a phone number.
+    // Only speaks up when something is wrong. Echoing a number she has just
+    // typed back at her says nothing she cannot already see.
     var built = signupPhone();
-    hint.textContent = built
-      ? (phoneLooksRight(built) ? built : "That does not look like a complete number yet")
+    hint.textContent = (built && !phoneLooksRight(built))
+      ? "That does not look like a complete number yet"
       : "";
   }
 
@@ -3979,7 +3979,14 @@
         });
       return;
     }
-    sb.from("clients").update({ user_id: userId }).eq("id", choice)
+    // Connecting an existing client: take the number she signed up with only
+    // if the studio has none on file. An existing number is one they have been
+    // using, so it is not overwritten silently.
+    var existing = clientById(choice);
+    var patch = { user_id: userId };
+    if (p.phone && existing && !existing.phone) patch.phone = p.phone;
+
+    sb.from("clients").update(patch).eq("id", choice)
       .select(CLIENT_COLS).single().then(function (res) {
         if (res.error) return fail(res.error, "Could not connect that client");
         done();
