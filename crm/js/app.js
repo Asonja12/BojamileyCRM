@@ -16,7 +16,7 @@
   // Shown at the bottom of the Menu and of a client's Account tab. When
   // something looks like it did not ship, this says whether the phone is
   // actually running the new copy. Keep it in step with the ?v= in index.html.
-  var APP_VERSION = "20260728f";
+  var APP_VERSION = "20260728g";
 
   /* ---------- Domain constants ---------- */
 
@@ -915,7 +915,7 @@
         '<div class="measure-grid">' +
           MEASUREMENTS.map(function (f) {
             return '<div class="field"><label for="my_' + f[0] + '">' + f[1] + "</label>" +
-              '<input id="my_' + f[0] + '" type="number" step="any" inputmode="decimal" value="' + esc(m[f[0]] || "") + '"></div>';
+              '<input id="my_' + f[0] + '" type="number" min="0" max="300" step="any" inputmode="decimal" value="' + esc(m[f[0]] || "") + '"></div>';
           }).join("") +
         "</div>" +
         '<div class="field" style="margin-top:14px"><label for="my_notes">Anything else</label>' +
@@ -933,10 +933,27 @@
     var out = {};
     var size = $("#my_size").value;
     if (size) out.size = size;
+
+    var wrong = null, count = 0;
     MEASUREMENTS.forEach(function (f) {
       var v = $("#my_" + f[0]).value.trim();
-      if (v) out[f[0]] = v;
+      if (!v) return;
+      var n = Number(v);
+      if (!isFinite(n) || n <= 0 || n > 300) { if (!wrong) wrong = f[1]; return; }
+      out[f[0]] = v;
+      count++;
     });
+    if (wrong) {
+      toast(wrong + " does not look right. Measurements are in inches, above zero.", true);
+      return;
+    }
+    // Sending nothing at all used to be accepted and announced as sent, and
+    // left the studio a blank form to approve.
+    if (!size && !count) {
+      toast("Add your size, or at least one measurement, before sending", true);
+      return;
+    }
+
     // Travels inside the same blob, but the studio keeps free text in
     // measure_notes, so accepting splits it back out - see reviewMeasurements.
     var note = $("#my_notes").value.trim();
