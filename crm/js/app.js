@@ -16,7 +16,7 @@
   // Shown at the bottom of the Menu and of a client's Account tab. When
   // something looks like it did not ship, this says whether the phone is
   // actually running the new copy. Keep it in step with the ?v= in index.html.
-  var APP_VERSION = "20260728j";
+  var APP_VERSION = "20260728k";
 
   /* ---------- Domain constants ---------- */
 
@@ -3969,22 +3969,25 @@
     }
 
     if (choice === "__new__") {
-      // carry over the number she gave at sign-up, so WhatsApp works from the
-      // moment she is connected rather than after someone retypes it
+      // carry over the number and address she signed up with, so Call,
+      // WhatsApp and email all work from the moment she is connected rather
+      // than after somebody retypes them
       sb.from("clients").insert({
-        name: p.fullName || p.email, user_id: userId, phone: p.phone || ""
+        name: p.fullName || p.email, user_id: userId,
+        phone: p.phone || "", email: p.email || ""
       }).select(CLIENT_COLS).single().then(function (res) {
           if (res.error) return fail(res.error, "Could not create the client record");
           done();
         });
       return;
     }
-    // Connecting an existing client: take the number she signed up with only
-    // if the studio has none on file. An existing number is one they have been
-    // using, so it is not overwritten silently.
+    // Connecting an existing client: take what she signed up with only where
+    // the studio has nothing on file. Details already there are ones they have
+    // been using, so they are not overwritten silently.
     var existing = clientById(choice);
     var patch = { user_id: userId };
     if (p.phone && existing && !existing.phone) patch.phone = p.phone;
+    if (p.email && existing && !existing.email) patch.email = p.email;
 
     sb.from("clients").update(patch).eq("id", choice)
       .select(CLIENT_COLS).single().then(function (res) {
