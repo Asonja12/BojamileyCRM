@@ -116,9 +116,16 @@ Internet is required since data lives in the cloud.
   piece comes together, what they have paid and still owe, and a form to send in
   their own measurements. They see nothing else: not other clients, not stock,
   not the studio's screens.
-  - Signing up, they pick *I'm a client*. Nothing is visible to them until an
-    Admin connects the sign-in to a client record, either an existing client or
-    a new one. New sign-ups wait at the top of the **Dashboard** under *New
+  - Signing up, they pick *I'm a client* and give a **phone number**, chosen
+    against a country (Nigeria by default). She types it as she would dial it at
+    home — `0803 123 4567` — and the app stores `+2348031234567`. That leading
+    zero is a domestic trunk prefix and has to be dropped when dialling from
+    abroad; keeping it is the usual way to end up with a number WhatsApp cannot
+    reach. The number it will actually use is shown back to her as she types.
+    Studio accounts can leave it blank. When the Admin connects her to a brand
+    new client, the number comes across with her.
+  - Nothing is visible to them until an Admin connects the sign-in to a client
+    record, either an existing client or a new one. New sign-ups wait at the top of the **Dashboard** under *New
     client sign-ups*, and that section disappears once none are waiting.
     **Connecting is deliberate, not automatic** — matching on a phone number
     would let anyone who knows it claim someone else's measurements and order
