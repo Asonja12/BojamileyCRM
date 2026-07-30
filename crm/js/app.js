@@ -16,7 +16,7 @@
   // Shown at the bottom of the Menu and of a client's Account tab. When
   // something looks like it did not ship, this says whether the phone is
   // actually running the new copy. Keep it in step with the ?v= in index.html.
-  var APP_VERSION = "20260728h";
+  var APP_VERSION = "20260728i";
 
   /* ---------- Domain constants ---------- */
 
@@ -579,10 +579,12 @@
     var btn = $("#signupBtn"), err = $("#signupError"), info = $("#signupInfo");
     err.hidden = true; info.hidden = true;
 
-    var phone = signupPhone();
+    // Studio accounts are not shown the field at all, so there is nothing to
+    // check for them and nothing to send.
+    var phone = signupAs() === "customer" ? signupPhone() : "";
     if (signupAs() === "customer") {
       if (!phone) {
-        err.textContent = "Please add your phone number — the studio reaches you on WhatsApp.";
+        err.textContent = "Please add your phone number.";
         err.hidden = false;
         return;
       }
@@ -591,10 +593,6 @@
         err.hidden = false;
         return;
       }
-    } else if (phone && !phoneLooksRight(phone)) {
-      err.textContent = "That phone number does not look complete. Leave it blank if you would rather not give one.";
-      err.hidden = false;
-      return;
     }
 
     btn.disabled = true; btn.textContent = "Creating account…";
@@ -644,23 +642,25 @@
     }).join("");
   }
 
-  // The studio needs a client's number to reach her on WhatsApp; someone who
-  // works there is already in the building, so it stays optional for them.
+  // Only a client is asked for a number. Someone who works at the studio is
+  // already in the building, so the field is not there at all rather than
+  // sitting present and ignorable.
   function syncSignupPhone() {
     var asClient = signupAs() === "customer";
-    var label = $('label[for="su_phone"]');
+    var field = $("#su_phoneField");
     var inp = $("#su_phone");
     var hint = $("#su_phoneHint");
-    if (!inp || !hint) return;
-    if (label) label.textContent = asClient ? "Phone number *" : "Phone number (optional)";
+    if (!field || !inp || !hint) return;
+
+    field.hidden = !asClient;
+    if (!asClient) { inp.value = ""; hint.textContent = ""; return; }
+
+    // Just the number it will use, so she can check it. No explanation: she
+    // knows why a tailor wants a phone number.
     var built = signupPhone();
     hint.textContent = built
-      ? (phoneLooksRight(built)
-          ? "The studio will message you on " + built
-          : "That does not look like a complete number yet")
-      : (asClient
-          ? "So the studio can reach you on WhatsApp about your order."
-          : "Optional for studio accounts.");
+      ? (phoneLooksRight(built) ? built : "That does not look like a complete number yet")
+      : "";
   }
 
   /* ============================================================
