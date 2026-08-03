@@ -16,7 +16,7 @@
   // Shown at the bottom of the Menu and of a client's Account tab. When
   // something looks like it did not ship, this says whether the phone is
   // actually running the new copy. Keep it in step with the ?v= in index.html.
-  var APP_VERSION = "20260728k";
+  var APP_VERSION = "20260728l";
 
   /* ---------- Domain constants ---------- */
 
@@ -1897,7 +1897,7 @@
     if (!chosen.length) chosen = clientOrders.slice(0, 1);
 
     var lines = chosen.map(function (o) {
-      return { description: (o.garment || "Garment") + (o.fabric ? " — " + o.fabric : "") + " (" + o.ref + ")", qty: 1, unit_price: Number(o.price || 0) };
+      return { description: (o.garment || "Garment") + (o.fabric ? " — " + o.fabric : ""), qty: 1, unit_price: Number(o.price || 0) };
     });
     if (!lines.length) lines = [{ description: "", qty: 1, unit_price: 0 }];
     var paid = chosen.reduce(function (t, o) { return t + paidTotal(o); }, 0);
@@ -4309,7 +4309,7 @@
         var lines = ids.map(function (oid) {
           var o = orderById(oid);
           return o
-            ? { description: (o.garment || "Garment") + (o.fabric ? " — " + o.fabric : "") + " (" + o.ref + ")", qty: 1, unit_price: Number(o.price || 0) }
+            ? { description: (o.garment || "Garment") + (o.fabric ? " — " + o.fabric : ""), qty: 1, unit_price: Number(o.price || 0) }
             : null;
         }).filter(Boolean);
         if (!lines.length) lines = [{ description: "", qty: 1, unit_price: 0 }];
