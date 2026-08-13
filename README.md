@@ -5,10 +5,9 @@ go with it. Two applications over one Postgres database, where every permission
 is enforced by the database rather than by hiding buttons.
 
 Built as a static site with no build step and no framework. In daily use by a
-working studio.
+working studio at **[bojamileycrm.netlify.app](https://bojamileycrm.netlify.app)**.
 
-<!-- Replace with a live link once deployed -->
-**[Live demo](#)** · **[Screenshots](#screenshots)** · **[Security model](#the-security-model)**
+**[Live app](https://bojamileycrm.netlify.app)** · [Screenshots](#screenshots) · [Security model](#the-security-model)
 
 ---
 
